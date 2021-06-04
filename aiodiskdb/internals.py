@@ -1,5 +1,3 @@
-import abc
-import asyncio
 import functools
 
 from aiodiskdb import exceptions
@@ -54,63 +52,3 @@ def ensure_async_lock(lock_type: LockType):
                 raise ValueError('Value must be LockType.READ or WRITE')
         return _ensure
     return _decorator
-
-
-class AsyncLockable:
-    def __init__(self):
-        self._locks = dict(write=asyncio.Lock(), read=asyncio.Lock, reads_count=[])
-
-    @property
-    def _read_lock(self):
-        return self._locks['read']
-
-    @property
-    def _write_lock(self):
-        return self._locks['write']
-
-    @property
-    def _reads_count(self):
-        return self._locks['reads_count']
-
-    def _incr_read(self):
-        self._locks['reads_count'] += 1
-
-    def _decr_read(self):
-        self._locks['reads_count'] -= 1
-
-
-class AsyncRunnable(metaclass=abc.ABCMeta):
-    def __init__(self):
-        self._running = False
-        self._error = False
-
-    @property
-    def running(self):
-        return self._running
-
-    @ensure_running(False)
-    async def run(self):
-        """
-        Must be launched before using the Database as a non blocking task.
-        example:
-        loop.create_task(instance.run())
-        loop.run_until_complete()
-        """
-        if self._error:
-            raise ValueError('error state')
-        elif self._running:
-            raise ValueError('already running')
-
-        self._running = True
-        while 1:
-            try:
-                await self._run_loop()
-                await asyncio.sleep(0.005)
-            except Exception as e:
-                self._running = False
-                self._error = e
-                raise
-
-    @abc.abstractmethod
-    async def _run_loop(self):
-        pass  # pragma: no cover

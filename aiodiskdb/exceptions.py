@@ -8,3 +8,7 @@ class NotRunningException(AioDiskDBException):
 
 class ReadTimeoutException(AioDiskDBException):
     pass
+
+
+class FailedToStopException(AioDiskDBException):
+    pass

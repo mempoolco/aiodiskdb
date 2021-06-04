@@ -4,10 +4,13 @@ from concurrent.futures.thread import ThreadPoolExecutor
 import time
 import typing
 
-from aiodiskdb.internals import ensure_running, ensure_future, ensure_async_lock, AsyncLockable, AsyncRunnable
+from aiodiskdb.internals import ensure_running, ensure_future, ensure_async_lock
+from aiodiskdb.abstracts import AsyncLockable, AsyncRunnable
 from aiodiskdb.types import ItemLocation, Location, LockType
 
 _FILE_SIZE = 128
+_FILE_PREFIX = 'DATA'
+_FILE_ZEROS_PADDING = 5
 _BUFFER_SIZE = 16
 _BUFFER_ITEMS = 2000
 _FLUSH_INTERVAL = 300
@@ -21,9 +24,14 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
     Minimal append only on-disk DB, with buffering and timeouts.
     Made with love for Asyncio.
     """
+
     def __init__(
             self,
             path: str,
+            start_location: Location = Location(0, 0, 0),
+            overwrite: bool = False,
+            file_padding: int = _FILE_ZEROS_PADDING,
+            file_prefix: str = _FILE_PREFIX,
             max_file_size: int = _FILE_SIZE,
             max_buffer_items: int = _BUFFER_ITEMS,
             max_buffer_size: int = _BUFFER_SIZE,
@@ -34,6 +42,9 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
     ):
         super().__init__()
         self.path = path
+        self._overwrite = False
+        self._file_prefix = file_prefix
+        self._file_padding = int(file_padding)
         self._max_file_size = int(max_file_size) * 1024 * 1024
         self._max_buffer_items = int(max_buffer_items)
         self._max_buffer_size = int(max_buffer_size) * 1024 * 1024
@@ -50,9 +61,13 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._read_files = OrderedDict()
         self._last_flush = None
         self._pending_reads_by_idx = OrderedDict()
-        self._concurrency = concurrency
+        self._concurrency = int(concurrency)
         self.executor = ThreadPoolExecutor(max_workers=concurrency)
-        self._current_add_location: typing.Optional[Location] = None
+        self._current_add_location = start_location
+        self._overwrite = overwrite
+
+    def enable_overwrite(self):
+        self._overwrite = True
 
     @property
     def current_buffer_size(self):
@@ -85,14 +100,14 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         )
         return buffer, buffer_size, add_location
 
-    async def _append_buffer_to_location(self, buffer: typing.List[bytes], size: int, location: Location):
+    async def _save_buffer_to_disk(self, buffer: typing.List[bytes], size: int, location: Location):
         ...
 
     async def _flush_buffer(self):
         await self._write_lock.acquire()
         buffer, buffer_size, add_location = self._pop_buffer()
         self._write_lock.release()
-        await self._append_buffer_to_location(buffer, buffer_size, add_location)
+        await self._save_buffer_to_disk(buffer, buffer_size, add_location)
 
     def _process_reads_for_index(self, index: int):
         """
@@ -102,7 +117,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             self._pending_reads_by_idx.pop(index),
             key=lambda x: x[0].position
         )
-        with open(f'{self.path}/data_' + f'{index}'.zfill(5)) as file:
+        with open(f'{self.path}/{self._file_prefix}_' + f'{index}'.zfill(self._file_padding)) as file:
             for location in locations:
                 file.seek(location[0].position)
                 data = file.read(location[0].length)
