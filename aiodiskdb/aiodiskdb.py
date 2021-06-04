@@ -1,48 +1,47 @@
 import asyncio
-import time
 from collections import OrderedDict
 from concurrent.futures.thread import ThreadPoolExecutor
-
+import time
 import typing
 
 from aiodiskdb.internals import ensure_running, ensure_future, ensure_async_lock, AsyncLockable, AsyncRunnable
-from aiodiskdb.types import ItemLocation, CurrentLocation
+from aiodiskdb.types import ItemLocation, Location, LockType
 
-_MAX_FILE_SIZE = 128
+_FILE_SIZE = 128
 _BUFFER_SIZE = 16
-_FLUSH_INTERVAL = 60
+_BUFFER_ITEMS = 2000
+_FLUSH_INTERVAL = 300
 _GENESIS_BYTES = b'\r\xce\x8f7'
-_CACHE_SIZE = 50
 _READ_TIMEOUT = 30
 _CONCURRENCY = 32
 
 
 class AioDiskDB(AsyncLockable, AsyncRunnable):
     """
-    Simple append only on-disk DB, with buffering and timeouts.
+    Minimal append only on-disk DB, with buffering and timeouts.
     Made with love for Asyncio.
     """
     def __init__(
             self,
             path: str,
-            max_file_size: int = _MAX_FILE_SIZE,
-            buffer_size: int = _BUFFER_SIZE,
+            max_file_size: int = _FILE_SIZE,
+            max_buffer_items: int = _BUFFER_ITEMS,
+            max_buffer_size: int = _BUFFER_SIZE,
             flush_interval: int = _FLUSH_INTERVAL,
             genesis_bytes: bytes = _GENESIS_BYTES,
-            cache_size: int = _CACHE_SIZE,
             read_timeout: int = _READ_TIMEOUT,
             concurrency: int = _CONCURRENCY
     ):
         super().__init__()
         self.path = path
         self._max_file_size = int(max_file_size) * 1024 * 1024
-        self._max_buffer_size = int(buffer_size) * 1024 * 1024
+        self._max_buffer_items = int(max_buffer_items)
+        self._max_buffer_size = int(max_buffer_size) * 1024 * 1024
         self._current_buffer_size = 0
         self._flush_interval = int(flush_interval)
         if len(self._genesis_bytes) != 4:
             raise ValueError('Genesis bytes length must be 4')
         self._genesis_bytes = genesis_bytes
-        self._cache_size = int(cache_size) * 1024 * 1024
         self._read_timeout = int(read_timeout)
         self._data_queue = asyncio.Queue()
         self._current_write_file = None
@@ -53,7 +52,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._pending_reads_by_idx = OrderedDict()
         self._concurrency = concurrency
         self.executor = ThreadPoolExecutor(max_workers=concurrency)
-        self._current_location: typing.Optional[CurrentLocation] = None
+        self._current_add_location: typing.Optional[Location] = None
 
     @property
     def current_buffer_size(self):
@@ -70,10 +69,30 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._pending_reads_by_idx[location.index].add([location, future])
         return future
 
-    @ensure_async_lock('write')
-    async def _flush_buffer(self):
+    def _pop_buffer(self) -> typing.Tuple[typing.List, int, Location]:
+        buffer, buffer_size = self._buffer, int(self._current_buffer_size)
+        self._buffer, self._buffer_index = [], {}
+        if self._current_buffer_size > self._max_buffer_size:
+            self._current_add_location = Location(
+                index=self._current_add_location.index + 1,
+                position=0, size_bytes=0
+            )
+        self._current_buffer_size = 0
+        add_location = Location(
+            index=int(self._current_add_location.index),
+            position=int(self._current_add_location.position),
+            size_bytes=int(self._current_add_location.size_bytes)
+        )
+        return buffer, buffer_size, add_location
 
-        self._last_flush = time.time()
+    async def _append_buffer_to_location(self, buffer: typing.List[bytes], size: int, location: Location):
+        ...
+
+    async def _flush_buffer(self):
+        await self._write_lock.acquire()
+        buffer, buffer_size, add_location = self._pop_buffer()
+        self._write_lock.release()
+        await self._append_buffer_to_location(buffer, buffer_size, add_location)
 
     def _process_reads_for_index(self, index: int):
         """
@@ -87,9 +106,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             for location in locations:
                 file.seek(location[0].position)
                 data = file.read(location[0].length)
-                asyncio.get_event_loop().create_task(
-                    location[1].set_result(data)
-                )
+                location[1].set_result(data)
 
     async def _process_pending_reads(self):
         """
@@ -113,9 +130,10 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             await self._flush_buffer()
         elif time.time() - self._last_flush > self._flush_interval:
             await self._flush_buffer()
+        elif len(self._buffer) > self._max_buffer_items:
+            await self._flush_buffer()
 
     @ensure_running(True)
-    @ensure_async_lock('write')
     async def add(self, data: bytes) -> ItemLocation:
         """
         Put data into the buffer, update the index for reads from RAM.
@@ -123,24 +141,27 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         :param data: bytes
         :return: ItemLocation(int, int, int)
         """
-        await self._locks['write'].acquire()
+        while self._current_buffer_size > self._max_buffer_size:
+            await asyncio.sleep(0.01)
+
+        await self._write_lock.acquire()
         try:
             data_size = len(data)
             location = ItemLocation(
-                self._current_location.index,
-                self._current_location.position,
+                self._current_add_location.index,
+                self._current_add_location.position,
                 data_size
             )
             self._buffer.append(data)
             self._buffer_index[location.serialized] = len(self._buffer) - 1
-            self._current_location.position += data_size
-            self._current_location.size_bytes += data_size
+            self._current_add_location.position += data_size
+            self._current_add_location.size_bytes += data_size
             return location
         finally:
-            self._locks['write'].release()
+            self._write_lock.release()
 
     @ensure_running(True)
-    @ensure_async_lock('read')
+    @ensure_async_lock(LockType.READ)
     @ensure_future
     async def read(self, location: ItemLocation, timeout=None):
         """
@@ -161,7 +182,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         )
 
     @ensure_running(True)
-    @ensure_async_lock('write')
+    @ensure_async_lock(LockType.WRITE)
     async def pop(self, location: ItemLocation):
         """
         Append only database, data can only be removed from some point to the end of file.

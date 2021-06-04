@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import typing
+from enum import Enum
 
 
 @dataclass
@@ -19,7 +20,12 @@ class ItemLocation:
 
 
 @dataclass
-class CurrentLocation:
+class Location:
     index: int
     position: int
     size_bytes: int
+
+
+class LockType(Enum):
+    READ = 0
+    WRITE = 1

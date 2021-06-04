@@ -2,9 +2,9 @@ class AioDiskDBException(Exception):
     pass
 
 
-class NotRunningException(Exception):
+class NotRunningException(AioDiskDBException):
     pass
 
 
-class ReadTimeoutException(Exception):
+class ReadTimeoutException(AioDiskDBException):
     pass

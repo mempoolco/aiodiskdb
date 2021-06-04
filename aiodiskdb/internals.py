@@ -3,6 +3,7 @@ import asyncio
 import functools
 
 from aiodiskdb import exceptions
+from aiodiskdb.types import LockType
 
 
 def ensure_running(expected_state: bool):
@@ -26,31 +27,31 @@ def ensure_future(f):
     return _ensure
 
 
-def ensure_async_lock(lock_type: str):
+def ensure_async_lock(lock_type: LockType):
     def _decorator(f):
         async def _ensure(self, *a, **kw):
-            if lock_type == 'read':
-                await self.locks['read'].acquire()
-                self.locks['reads_count'] += 1
-                if self.locks['reads_count'] == 1:
-                    await self.locks['write'].acquire()
-                self.locks['read'].release()
+            if lock_type == LockType.READ:
+                await self._read_lock.acquire()
+                self._incr_read()
+                if self._reads_count == 1:
+                    await self.write_lock.acquire()
+                self.read_lock.release()
                 try:
                     return f(*a, **kw)
                 finally:
-                    await self.locks['read'].acquire()
-                    self.locks['reads_count'] -= 1
-                    if not self.locks['reads_count']:
-                        self.lock['write'].release()
-                    self.lock['read'].release()
-            elif lock_type == 'write':
-                await self.locks['write'].acquire()
+                    await self.read_lock.acquire()
+                    self._decr_read()
+                    if not self._reads_count:
+                        self.write_lock.release()
+                    self.read_lock.release()
+            elif lock_type == LockType.WRITE:
+                await self.write_lock.acquire()
                 try:
                     return f(*a, **kw)
                 finally:
-                    self.locks['write'].release()
+                    self.write_lock.release()
             else:
-                raise ValueError('Value must be read\write')
+                raise ValueError('Value must be LockType.READ or WRITE')
         return _ensure
     return _decorator
 
@@ -58,6 +59,24 @@ def ensure_async_lock(lock_type: str):
 class AsyncLockable:
     def __init__(self):
         self._locks = dict(write=asyncio.Lock(), read=asyncio.Lock, reads_count=[])
+
+    @property
+    def _read_lock(self):
+        return self._locks['read']
+
+    @property
+    def _write_lock(self):
+        return self._locks['write']
+
+    @property
+    def _reads_count(self):
+        return self._locks['reads_count']
+
+    def _incr_read(self):
+        self._locks['reads_count'] += 1
+
+    def _decr_read(self):
+        self._locks['reads_count'] -= 1
 
 
 class AsyncRunnable(metaclass=abc.ABCMeta):
