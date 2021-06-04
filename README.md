@@ -4,10 +4,13 @@
 
 aiodiskdb is lightweight, fast, simple append only in-file database.
 
-the codebase is tailored for asyncio.
+To be used in the `asyncio` event loop.
 
 
-###Easy to use
+### Easy to use
+
+Awaitable API for writing and reading data.
+
 ```python
 import asyncio
 from aiodiskdb import AioDiskDB, ItemLocation
@@ -16,21 +19,28 @@ db = AioDiskDB('/tmp/aiodiskdb')
 
 async def read_and_write():
     location = await db.add(b'data')
-    assert b'data' == await db.read(location)
-
+    data = await db.read(location)
 ```
 
-The database works with *asyncio* event loops, and must be started and stopped before and after the usage:
+### Asynchronous non blocking 
 
+Once added, data is saved in RAM, and persisted into the disk according customizable settings. 
+Blocking calls are handled by a background tasks.
+
+Start the DB by fire and forget.
 ```python
-self.loop.create_task(db.start())  # lrt, must be fired as task
-await db.stop()  # must be awaited
+self.loop.create_task(db.start())
 ```
 
+Stop the DB before closing the application.
+```python
+await db.stop()
+```
 
 Inspired by the [bitcoincore blocks database](https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_2):_Data_Storage),
 aiodiskdb store data into files.
 
 As Bitcoincore blocks database, aiodiskdb' files *are about 128 MB, allocated in 16 MB chunks to prevent excessive fragmentation*
+
 
 
