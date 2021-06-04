@@ -12,3 +12,11 @@ class ReadTimeoutException(AioDiskDBException):
 
 class FailedToStopException(AioDiskDBException):
     pass
+
+
+class DBNotInitializedException(AioDiskDBException):
+    pass
+
+
+class NotFoundException(AioDiskDBException):
+    pass
