@@ -1,4 +1,6 @@
 import asyncio
+import os
+import shutil
 from collections import OrderedDict
 from concurrent.futures.thread import ThreadPoolExecutor
 from pathlib import Path
@@ -205,4 +207,5 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         """
         Destroy the DB, clean the disk.
         """
-        pass
+        shutil.rmtree(self.path)
+        return True
