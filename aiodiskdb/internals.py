@@ -35,7 +35,7 @@ def ensure_async_lock(lock_type: LockType):
             elif lock_type == LockType.WRITE:
                 await self._write_lock.acquire()
                 try:
-                    return f(self, *a, **kw)
+                    return await f(self, *a, **kw)
                 finally:
                     self._write_lock.release()
             else:

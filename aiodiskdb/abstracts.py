@@ -52,8 +52,6 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             raise ValueError('error state')
         elif self._running:
             raise ValueError('already running')
-
-        self._running = True
         while 1:
             try:
                 if self._do_stop:
@@ -61,6 +59,7 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
                     break
                 await self._run_loop()
                 await asyncio.sleep(0.005)
+                self._running = True
             except Exception as e:
                 self._running = False
                 self._error = e

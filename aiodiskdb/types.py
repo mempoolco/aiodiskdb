@@ -8,24 +8,24 @@ from enum import Enum
 class ItemLocation:
     index: int
     position: int
-    length: typing.Union[None, int]
-
-    @property
-    def serialized(self):
-        if not self.length:
-            raise ValueError('Cannot serialize item with no length')
-        return int.to_bytes(self. index, 4, 'little') + \
-            int.to_bytes(self.position, 4, 'little') + \
-            int.to_bytes(self.length, 4, 'little')
-
-
-@dataclass
-class Location:
-    index: int
-    position: int
-    size_bytes: int
+    size: int
 
 
 class LockType(Enum):
     READ = 0
     WRITE = 1
+
+
+@dataclass
+class Buffer:
+    index: int
+    data: bytes
+    size: int
+    items: int
+    file_size: int
+
+
+@dataclass
+class TempBufferData:
+    buffer: typing.Optional[Buffer]
+    idx: typing.Dict

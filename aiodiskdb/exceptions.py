@@ -6,6 +6,10 @@ class NotRunningException(AioDiskDBException):
     pass
 
 
+class WriteTimeoutException(AioDiskDBException):
+    pass
+
+
 class ReadTimeoutException(AioDiskDBException):
     pass
 
