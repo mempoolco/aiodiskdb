@@ -6,11 +6,10 @@ from aiodiskdb.types import LockType
 
 def ensure_running(expected_state: bool):
     def _decorator(f):
-        @functools.wraps(f)
-        def _checker(self, *a, **kw):
+        async def _checker(self, *a, **kw):
             if self.running != expected_state:
                 raise exceptions.NotRunningException
-            return f(self, *a, **kw)
+            return await f(self, *a, **kw)
         return _checker
     return _decorator
 

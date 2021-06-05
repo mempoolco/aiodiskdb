@@ -29,6 +29,10 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
         self._stop_timeout = stop_timeout
 
     @abc.abstractmethod
+    async def _pre_loop(self):
+        pass  # pragma: no cover
+
+    @abc.abstractmethod
     async def _run_loop(self):
         pass  # pragma: no cover
 
@@ -52,6 +56,12 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             raise ValueError('error state')
         elif self._running:
             raise ValueError('already running')
+        try:
+            await self._pre_loop()
+        except Exception as e:
+            self._running = False
+            self._error = e
+            raise
         while 1:
             try:
                 if self._do_stop:

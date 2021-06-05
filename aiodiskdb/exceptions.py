@@ -36,3 +36,7 @@ class FilesInconsistencyException(AioDiskDBException):
 
 class WriteFailedException(AioDiskDBException):
     pass
+
+
+class InvalidConfigurationException(AioDiskDBException):
+    pass

@@ -50,10 +50,14 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         if create_if_not_exists:
             self.path.mkdir(parents=True, exist_ok=True)
         self._file_prefix = file_prefix
+        if max_file_size <= 0 or max_buffer_size <= 0:
+            raise exceptions.InvalidConfigurationException('max file size and max buffer size must be > 0')
+        if max_file_size < max_buffer_size:
+            raise exceptions.InvalidConfigurationException('max_file_size must be >= max_buffer_size')
         self._file_padding = int(file_padding)
-        self._max_file_size = int(max_file_size) * 1024 ** 2
+        self._max_file_size = int(float(max_file_size) * 1024 ** 2)
         self._max_buffer_items = int(max_buffer_items)
-        self._max_buffer_size = int(max_buffer_size) * 1024 ** 2
+        self._max_buffer_size = int(float(max_buffer_size) * 1024 ** 2)
         self._flush_interval = int(flush_interval)
         if len(genesis_bytes) != self.GENESIS_BYTES_LENGTH:
             raise ValueError('Genesis bytes length must be 4')
@@ -65,7 +69,6 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._last_flush = None
         self._executor = ThreadPoolExecutor(max_workers=concurrency)
         self._overwrite = overwrite
-        self._setup_current_buffer()
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
 
     @ensure_async_lock(LockType.WRITE)
@@ -111,7 +114,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         return f'{self.path}/{self._file_prefix}' + f'{idx}'.zfill(self._file_padding) + '.dat'
 
     @ensure_running(False)
-    def _setup_current_buffer(self):
+    async def _setup_current_buffer(self):
         """
         Setup the current buffer, starting from the disk files.
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
@@ -194,7 +197,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         await self._pop_buffer()
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
-            self._save_buffer_to_disk
+            self._save_buffer_to_disk,
         )
         await self._clean_temp_buffer()
         self._last_flush = time.time()
@@ -212,9 +215,12 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         except FileNotFoundError:
             raise exceptions.DBNotInitializedException
 
-    async def _run_loop(self):
+    async def _pre_loop(self):
         if self._last_flush is None:
             self._last_flush = time.time()
+        await self._setup_current_buffer()
+
+    async def _run_loop(self):
         buffer = self._buffers[0]
         if buffer.file_size >= self._max_file_size:
             await self._flush_buffer()
@@ -283,10 +289,10 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             location
         )
 
-    @ensure_running(False)
     def destroy(self):
         """
         Destroy the DB, clean the disk.
         """
+        assert not self.running
         shutil.rmtree(self.path)
         return True
