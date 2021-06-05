@@ -249,7 +249,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         return await self._add(data)
 
     @ensure_async_lock(LockType.WRITE)
-    async def _add(self, data):
+    async def _add(self, data: bytes) -> ItemLocation:
         """
         Add data into the current buffer.
         """
@@ -271,6 +271,15 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         buffer.file_size += data_size
         return location
 
+    @ensure_async_lock(LockType.WRITE)
+    async def add_many(self, data: bytes) -> typing.Sequence[ItemLocation]:
+        """
+        Add multiple entries.
+        Return multiple locations.
+        Block all the access to the DB, but grant atomic "all or nothing" write, even on multiple files.
+        """
+        ...
+
     @ensure_running(True)
     @ensure_async_lock(LockType.READ)
     async def read(self, location: ItemLocation):
@@ -289,10 +298,17 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             location
         )
 
-    def destroy(self):
+    def destroy_db(self):
         """
         Destroy the DB, clean the disk.
         """
         assert not self.running
         shutil.rmtree(self.path)
         return True
+
+    @ensure_running(True)
+    def destroy_index(self, index: int):
+        """
+        Destroy a single index.
+        """
+        ...
