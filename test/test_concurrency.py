@@ -4,11 +4,11 @@ import random
 import time
 from random import randint
 
-from tests import AioDiskDBTestCase, run_test_db
+from test import AioDiskDBTestCase, run_test_db
 
 
 class TestAioDiskDBConcurrentReadWrite(AioDiskDBTestCase):
-    def setUp(self):
+    def setUp(self, *a, **kw):
         super().setUp()
         self._data = list()
         self._running_test = False

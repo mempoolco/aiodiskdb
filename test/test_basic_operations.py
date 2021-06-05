@@ -1,6 +1,6 @@
 import asyncio
 from aiodiskdb.types import ItemLocation
-from tests import AioDiskDBTestCase, run_test_db
+from test import AioDiskDBTestCase, run_test_db
 
 
 class TestReadWriteCached(AioDiskDBTestCase):

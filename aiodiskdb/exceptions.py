@@ -22,9 +22,17 @@ class DBNotInitializedException(AioDiskDBException):
     pass
 
 
-class NotFoundException(AioDiskDBException):
+class InvalidDataFileException(AioDiskDBException):
     pass
 
 
-class InvalidDataFileException(AioDiskDBException):
+class ReadOnlyDatabaseException(AioDiskDBException):
+    pass
+
+
+class FilesInconsistencyException(AioDiskDBException):
+    pass
+
+
+class WriteFailedException(AioDiskDBException):
     pass

@@ -5,9 +5,9 @@ from aiodiskdb.aiodiskdb import AioDiskDB
 
 
 class AioDiskDBTestCase(IsolatedAsyncioTestCase):
-    def setUp(self):
+    def setUp(self, max_file_size=128):
         self.loop = asyncio.get_event_loop()
-        self._max_file_size = 128
+        self._max_file_size = max_file_size
         self._setup_sut()
         self.sut.destroy()
         self._setup_sut()

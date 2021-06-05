@@ -4,18 +4,17 @@ import random
 import time
 from random import randint
 
-from tests import AioDiskDBTestCase, run_test_db
+from test import AioDiskDBTestCase, run_test_db
 
 
 class TestAioDiskDBConcurrentReadWriteSmallFiles(AioDiskDBTestCase):
-    def setUp(self):
-        super().setUp()
+    def setUp(self, *a, **kw):
+        super().setUp(max_file_size=16)
         self._data = list()
         self._running_test = False
         self._ongoing_reads = False
         self._reads_count = 0
         self._writes_count = 0
-        self._max_file_size = 16
 
     async def _random_reads(self):
         self._ongoing_reads = True
