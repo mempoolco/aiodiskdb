@@ -24,6 +24,8 @@ _CONCURRENCY = 32
 
 
 class AioDiskDB(AsyncLockable, AsyncRunnable):
+    GENESIS_BYTES_LENGTH = 4
+
     """
     Minimal on-disk DB, with buffering and timeouts.
     Made with love for Asyncio.
@@ -54,7 +56,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._max_buffer_items = int(max_buffer_items)
         self._max_buffer_size = int(max_buffer_size) * 1024 ** 2
         self._flush_interval = int(flush_interval)
-        if len(genesis_bytes) != 4:
+        if len(genesis_bytes) != self.GENESIS_BYTES_LENGTH:
             raise ValueError('Genesis bytes length must be 4')
         self._genesis_bytes = genesis_bytes
         self._read_timeout = int(read_timeout)
@@ -75,13 +77,14 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         try:
             idx = self._buffer_index[location.index][location.position]
             buffer = self._buffers[idx]
-            offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
-            relative_position = location.position - offset
-            data = buffer.data[relative_position: relative_position + location.size]
-            assert len(data) == location.size, f'{len(data)} != {location.size}'
-            return data
         except KeyError:
             return None
+
+        offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
+        relative_position = location.position - offset
+        data = buffer.data[relative_position: relative_position + location.size]
+        assert len(data) == location.size, f'{len(data)} != {location.size}'
+        return data
 
     def _read_data_from_temp_buffer(self, location: ItemLocation):
         """
@@ -90,15 +93,16 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         """
         try:
             idx = self._tmp_idx_and_buffer.idx[location.index][location.position]
-            buffer = self._tmp_idx_and_buffer.buffer
-            # just ensures the idx was previously saved, the temp buffer is flat.
-            offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
-            relative_position = location.position - offset
-            data = idx is not None and buffer.data[relative_position:relative_position + location.size] or None
-            assert data is not None and len(data) == location.size or data is None
-            return data
         except KeyError:
             return None
+
+        buffer = self._tmp_idx_and_buffer.buffer
+        # just ensures the idx was previously saved, the temp buffer is flat.
+        offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
+        relative_position = location.position - offset
+        data = idx is not None and buffer.data[relative_position:relative_position + location.size] or None
+        assert data is not None and len(data) == location.size or data is None
+        return data
 
     def _get_filename_by_idx(self, idx: int) -> str:
         return f'{self.path}/{self._file_prefix}' + f'{idx}'.zfill(self._file_padding) + '.dat'
@@ -109,12 +113,17 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         last_file = files and files[-1]
         if not last_file:
             # No previous files found for the current setup. Starting a new database.
-            curr_idx, curr_size = 0, 0
+            data, curr_size, curr_idx = self._genesis_bytes, self.GENESIS_BYTES_LENGTH, 0
         else:
             curr_idx = int(last_file.replace(self._file_prefix, '').replace('.dat', ''))
-            curr_size = os.path.getsize(self._get_filename_by_idx(curr_idx))
+            filename = self._get_filename_by_idx(curr_idx)
+            curr_size = os.path.getsize(filename)
+            with open(filename, 'rb') as f:
+                if f.read(4) != self._genesis_bytes:
+                    raise exceptions.InvalidDataFileException
+            data = b''
         self._buffers.append(
-            Buffer(index=curr_idx, data=b'', size=0, items=0, file_size=curr_size)
+            Buffer(index=curr_idx, data=data, size=len(data), items=0, file_size=curr_size)
         )
         self._buffer_index[curr_idx] = OrderedDict()
 
@@ -137,7 +146,8 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._tmp_idx_and_buffer = TempBufferData(idx={buffer.index: v}, buffer=buffer)
         if buffer.file_size > self._max_file_size:
             new_buffer = Buffer(
-                index=buffer.index + 1, data=b'', size=0, items=0, file_size=0
+                index=buffer.index + 1, data=self._genesis_bytes, size=self.GENESIS_BYTES_LENGTH,
+                items=0, file_size=self.GENESIS_BYTES_LENGTH
             )
         else:
             new_buffer = Buffer(

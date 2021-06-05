@@ -24,3 +24,7 @@ class DBNotInitializedException(AioDiskDBException):
 
 class NotFoundException(AioDiskDBException):
     pass
+
+
+class InvalidDataFileException(AioDiskDBException):
+    pass
