@@ -1,5 +1,4 @@
-# aiodiskdb
-
+![aiodiskdb logo](./docs/logo128.png "aiodiskdb")
 ### Minimal, embeddable on-disk DB, tailored for asyncio.
 
 ---
@@ -8,7 +7,7 @@
 [![PyPI license](https://img.shields.io/pypi/l/aiodiskdb.svg)](https://pypi.python.org/pypi/aiodiskdb/)
 [![PyPI pyversions](https://img.shields.io/pypi/pyversions/aiodiskdb.svg)](https://pypi.python.org/pypi/aiodiskdb/)
 [![Build Status](https://travis-ci.com/mempoolco/aiodiskdb.svg?branch=main)](https://travis-ci.com/mempoolco/aiodiskdb)
-[![Donate with Bitcoin](https://en.cryptobadges.io/badge/micro/3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV)](bitcoin://3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV)
+[![Donate with Bitcoin](https://en.cryptobadges.io/badge/micro/3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV)](https://en.cryptobadges.io/donate/3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV)
 
 aiodiskdb is a lightweight, fast, simple append only database.
 
