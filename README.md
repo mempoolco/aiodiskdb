@@ -4,9 +4,10 @@
 
 ---
 [![Coverage Status](https://coveralls.io/repos/github/mempoolco/aiodiskdb/badge.svg?branch=main)](https://coveralls.io/github/mempoolco/aiodiskdb?branch=main)
- [![PyPI version](https://badge.fury.io/py/aiodiskdb.svg)](https://badge.fury.io/py/aiodiskdb)
+[![PyPI version](https://badge.fury.io/py/aiodiskdb.svg)](https://badge.fury.io/py/aiodiskdb)
 [![PyPI license](https://img.shields.io/pypi/l/aiodiskdb.svg)](https://pypi.python.org/pypi/aiodiskdb/)
 [![PyPI pyversions](https://img.shields.io/pypi/pyversions/aiodiskdb.svg)](https://pypi.python.org/pypi/aiodiskdb/)
+[![Build Status](https://travis-ci.com/mempoolco/aiodiskdb.svg?branch=master)](https://travis-ci.com/mempoolco/aiodiskdb)
 
 aiodiskdb is a lightweight, fast, simple append only database.
 
