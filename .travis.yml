@@ -4,9 +4,6 @@ os:
 dist:
   - focal
 python:
-  - 3.5.3
-  - 3.6.3
-  - 3.7.2
   - 3.8.5
   - 3.9.1
 script:
