@@ -80,7 +80,7 @@ Data is appended in RAM and persisted asynchronously, according to customizable 
 ### Transactional
 
 "All or nothing" commit. 
-Lock all the DB write operations while in transaction, allow the reads.
+Lock all the DB write operations during commits, still allowing the reads.
 Ensure an arbitrary sequence of data is persisted to disk.
 
 Transaction is scoped. Data added into a transaction is not available outside until committed.
@@ -127,7 +127,7 @@ At its maximum capacity will allocate 10,000 files.
 
 ### Try to do its best
 
-Must be hook the special blocking `on_stop_signal` method to mitigate data losses on exit.
+Hook the blocking `on_stop_signal` method to avoid data losses on exit.
 ```python
 import signal
 from aiodiskdb import AioDiskDB
@@ -159,7 +159,21 @@ Bandwidth: 20MB (1.05MB/s),
 Avg file size: 1.0kB
 ```
 
+### Not-so-append-only
+
+**Aiodiskdb** is an append-only database. It means you'll never see *delete* or *remove* methods 
+around. However, indexes can be truncated, resulting a bulk delete of multiple locations.
+
+With a combination of the `transaction` and `index_drop` methods, data pruning can be implemented.
+
+---
+
+### Credits
+
 Inspired by the raw block data storage of the [bitcoincore blocks database](https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_2):_Data_Storage).
+
+
+### Notes
 
 **Readme is a design document, some features may not be available yet.**
 
