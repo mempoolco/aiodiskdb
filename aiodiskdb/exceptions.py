@@ -44,3 +44,15 @@ class WriteFailedException(AioDiskDBException):
 
 class InvalidConfigurationException(AioDiskDBException):
     pass
+
+
+class EmptyTransactionException(AioDiskDBException):
+    pass
+
+
+class TransactionCommitOnGoingException(AioDiskDBException):
+    pass
+
+
+class TransactionAlreadyCommittedException(AioDiskDBException):
+    pass

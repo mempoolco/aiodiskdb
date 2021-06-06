@@ -50,3 +50,9 @@ class EventsHandlers:
         if value and not asyncio.iscoroutinefunction(value):
             raise TypeError(f'{key} must be a coroutine')
         self.__dict__[key] = value
+
+
+class TransactionStatus(Enum):
+    INITIALIZED = 1
+    ONGOING = 2
+    DONE = 3
