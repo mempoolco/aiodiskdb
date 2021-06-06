@@ -152,8 +152,13 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         self._status = TransactionStatus.ONGOING
         await self._ensure_flush()
         assert not self.session._buffers[-1].size
-        await self.session._write_db_snapshot(timestamp)
+        idx_involved_in_batch = list()
         temp_buffers_data = self._bake_temp_buffer_data()
+        for buff in temp_buffers_data:
+            idx_involved_in_batch.extend(list(buff.idx))
+        await self.session._write_db_snapshot(
+            timestamp, *set(idx_involved_in_batch)
+        )
         assert temp_buffers_data
         temp_buffer_data = None
         for temp_buffer_data in temp_buffers_data:
