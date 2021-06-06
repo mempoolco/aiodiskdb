@@ -2,9 +2,11 @@ import abc
 import asyncio
 import time
 
+import typing
+
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running, GracefulExit
-from aiodiskdb.local_types import EventsHandlers
+from aiodiskdb.local_types import EventsHandlers, ItemLocation
 
 
 class AsyncLockable(metaclass=abc.ABCMeta):
@@ -124,3 +126,13 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
                 return True
             await asyncio.sleep(0.1)
         raise exceptions.FailedToStopException(f'Loop is still running after {self._stop_timeout} seconds')
+
+
+class AioDiskDBTransactionAbstract(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def add(self, data: bytes) -> None:
+        pass  # pragma: no cover
+
+    @abc.abstractmethod
+    def commit(self) -> typing.Iterable[ItemLocation]:
+        pass  # pragma: no cover

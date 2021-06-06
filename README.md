@@ -56,8 +56,9 @@ await db.stop()
 Be alerted when data is actually persisted to disk:
 
 ```python
-async def callback(location: ItemLocation):
-    log(f'{location} persisted to disk.')
+async def callback(timestamp: int, location: ItemLocation):
+    human_time = datetime.fromtimestamp(timestamp).isoformat()
+    log(f'{human_time} - {location} persisted to disk.')
     await do_something(location)
     
 db.events.on_write = callback

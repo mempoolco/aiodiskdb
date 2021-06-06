@@ -9,7 +9,7 @@ import typing
 
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running,  ensure_async_lock
-from aiodiskdb.abstracts import AsyncRunnable
+from aiodiskdb.abstracts import AsyncRunnable, AioDiskDBTransactionAbstract
 from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData
 
 _FILE_SIZE = 128
@@ -89,6 +89,9 @@ class AioDiskDB(AsyncRunnable):
 
     @ensure_async_lock(LockType.WRITE)
     async def _clean_temp_buffer(self):
+        await self._clean_temp_buffer_non_locked()
+
+    async def _clean_temp_buffer_non_locked(self):
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
 
     def _read_data_from_buffer(self, location: ItemLocation):
@@ -136,6 +139,9 @@ class AioDiskDB(AsyncRunnable):
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
         """
         files = sorted(os.listdir(self.path))
+        if any(filter(lambda _f: _f.startswith('.transaction-snapshot-'), files)):
+            raise exceptions.PendingSnapshotException
+
         last_file = files and files[-1]
         if not last_file:
             # No previous files found for the current setup. Starting a new database.
@@ -162,6 +168,9 @@ class AioDiskDB(AsyncRunnable):
 
     @ensure_async_lock(LockType.WRITE)
     async def _pop_buffer_data(self) -> TempBufferData:
+        return await self._pop_buffer_data_non_locked()
+
+    async def _pop_buffer_data_non_locked(self) -> TempBufferData:
         """
         Remove the buffer from the data queue.
         Put it into the temp storage for disk writing.
@@ -302,15 +311,6 @@ class AioDiskDB(AsyncRunnable):
         buffer.file_size += data_size
         return location
 
-    @ensure_async_lock(LockType.WRITE)
-    async def add_many(self, data: bytes) -> typing.Sequence[ItemLocation]:
-        """
-        Add multiple entries.
-        Return multiple locations.
-        Block all the access to the DB, but grant atomic "all or nothing" write, even on multiple files.
-        """
-        ...
-
     @ensure_running(True)
     @ensure_async_lock(LockType.READ)
     async def read(self, location: ItemLocation):
@@ -329,6 +329,11 @@ class AioDiskDB(AsyncRunnable):
             location
         )
 
+    @ensure_running(True)
+    async def transaction(self) -> AioDiskDBTransactionAbstract:
+        from aiodiskdb.transaction import AioDiskDBTransaction
+        return AioDiskDBTransaction(self)
+
     def destroy_db(self):
         """
         Destroy the DB, clean the disk.
@@ -341,7 +346,7 @@ class AioDiskDB(AsyncRunnable):
         return True
 
     @ensure_running(True)
-    async def drop_index(self, index: int):
+    async def drop_index(self, index: int) -> int:
         """
         Destroy a single index.
         """
@@ -351,3 +356,17 @@ class AioDiskDB(AsyncRunnable):
         self.events.on_index_drop and asyncio.get_event_loop().create_task(
             self.events.on_index_drop(time.time(), index, dropped_index_size)
         )
+        return dropped_index_size
+
+    @ensure_running(False)
+    async def apply_snapshot(self):
+        """
+        Apply a database snapshot to recover a previous status.
+        A snapshot is created before a transaction commit is made.
+        Having a snapshot file during the AioDiskDB boot mean that a transaction commit is failed,
+        and stale data may exists in the files.
+        Applying the snapshot trim the files to the status saved before the commit operation was started.
+        Stale data is deleted.
+        """
+        if not self._overwrite:
+            raise exceptions.ReadOnlyDatabaseException

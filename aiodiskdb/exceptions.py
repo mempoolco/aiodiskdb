@@ -56,3 +56,7 @@ class TransactionCommitOnGoingException(AioDiskDBException):
 
 class TransactionAlreadyCommittedException(AioDiskDBException):
     pass
+
+
+class PendingSnapshotException(AioDiskDBException):
+    pass
