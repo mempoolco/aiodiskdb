@@ -60,16 +60,16 @@ async def callback(location: ItemLocation):
     log(f'{location} persisted to disk.')
     await do_something(location)
     
-db.on_write = callback
+db.events.on_write = callback
 ```
 
 Or hook to many other events:
 ```python
-db.on_start = ...
-db.on_stop = ...
-db.on_failure = ...
-db.on_destroy_db = ...
-db.on_destroy_index = ...
+db.events.on_start = ...
+db.events.on_stop = ...
+db.events.on_failure = ...
+db.events.on_destroy_db = ...
+db.events.on_destroy_index = ...
 ```
 
 ### Asynchronous non-blocking
@@ -124,6 +124,20 @@ With `file_padding=5` the max number of files is 10,000.
 A DB created with `file_padding=5` and `max_file_size=16` is capable to store up to 160 GB, or 167,772,160,000 items. 
 
 At its maximum capacity will allocate 10,000 files.
+
+### Try to do its best
+
+Must be hook the special blocking `on_stop_signal` method to mitigate data losses on exit.
+```python
+import signal
+from aiodiskdb import AioDiskDB
+
+db = AioDiskDB(...)
+
+signal.signal(signal.SIGINT, db.on_stop_signal)
+signal.signal(signal.SIGTERM, db.on_stop_signal)
+signal.signal(signal.SIGKILL, db.on_stop_signal)
+```
 
 ### Quite enough fast for some use cases
 

@@ -27,13 +27,13 @@ class TestReadWriteNonCached(AioDiskDBTestCase):
     async def test(self):
         item_location = await self.sut.add(b'test_1')
         self.assertEqual(
-            item_location,
-            ItemLocation(0, 0 + self.sut.GENESIS_BYTES_LENGTH, 6)
+            ItemLocation(0, 0 + self.sut.GENESIS_BYTES_LENGTH, 6),
+            item_location
         )
         item_location_2 = await self.sut.add(b'test_2')
         self.assertEqual(
-            item_location_2,
-            ItemLocation(0, 6 + self.sut.GENESIS_BYTES_LENGTH, 6)
+            ItemLocation(0, 6 + self.sut.GENESIS_BYTES_LENGTH, 6),
+            item_location_2
         )
         await self.sut.stop()  # stop the sut, ensures the data write
         self._setup_sut()  # re-instance the sut from scratch.
@@ -41,6 +41,10 @@ class TestReadWriteNonCached(AioDiskDBTestCase):
         while not self.sut.running:
             await asyncio.sleep(0.01)
         read1 = await self.sut.read(item_location_2)
-        self.assertEqual(read1, b'test_2')
+        self.assertEqual(b'test_2', read1)
         read2 = await self.sut.read(item_location_2)
-        self.assertEqual(read2, b'test_2')
+        self.assertEqual(b'test_2', read2)
+
+        item_location_3 = item_location_2
+        item_location_3.index = 99
+        self.assertEqual(b'', await self.sut.read(item_location_3))

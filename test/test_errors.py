@@ -44,3 +44,18 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
             for _ in range(0, 100):
                 await self.sut.add(os.urandom(10240))
         self.assertTrue('File /tmp/aiodiskdb_test/data00001.dat should not exists' in str(self.sut._error))
+
+
+class AioDBTestErrorZeroDBSizeError(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(max_file_size=0, max_buffer_size=0)
+
+
+class AioDBTestErrorInvalidDBSizeError(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(max_file_size=1, max_buffer_size=2)
+

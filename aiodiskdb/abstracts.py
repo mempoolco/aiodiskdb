@@ -1,9 +1,10 @@
 import abc
 import asyncio
+import signal
 import time
 
 from aiodiskdb import exceptions
-from aiodiskdb.internals import ensure_running
+from aiodiskdb.internals import ensure_running, GracefulExit
 
 
 class AsyncLockable(metaclass=abc.ABCMeta):
@@ -27,6 +28,14 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
         self._error = False
         self._do_stop = False
         self._stop_timeout = stop_timeout
+        self._blocking_stop = False
+
+    @abc.abstractmethod
+    def on_stop_signal(self):
+        """
+        Non async method. Handle stop signals.
+        """
+        pass  # pragma: no cover
 
     @abc.abstractmethod
     async def _pre_loop(self):
@@ -56,6 +65,7 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             raise ValueError('error state')
         elif self._running:
             raise ValueError('already running')
+
         try:
             await self._pre_loop()
         except Exception as e:
@@ -63,6 +73,8 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             self._error = e
             raise
         while 1:
+            if self._blocking_stop:
+                break
             try:
                 if self._do_stop:
                     await self._teardown()

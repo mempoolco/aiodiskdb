@@ -1,16 +1,14 @@
-import functools
-
 from aiodiskdb import exceptions
 from aiodiskdb.types import LockType
 
 
 def ensure_running(expected_state: bool):
     def _decorator(f):
-        async def _checker(self, *a, **kw):
+        async def _ensure(self, *a, **kw):
             if self.running != expected_state:
                 raise exceptions.NotRunningException
             return await f(self, *a, **kw)
-        return _checker
+        return _ensure
     return _decorator
 
 
@@ -41,3 +39,7 @@ def ensure_async_lock(lock_type: LockType):
                 raise ValueError('Value must be LockType.READ or WRITE')
         return _ensure
     return _decorator
+
+
+class GracefulExit(SystemExit):
+    code = 1

@@ -2,6 +2,10 @@ class AioDiskDBException(Exception):
     pass
 
 
+class RunningException(AioDiskDBException):
+    pass
+
+
 class NotRunningException(AioDiskDBException):
     pass
 

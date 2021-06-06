@@ -71,6 +71,21 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._overwrite = overwrite
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
 
+    def on_stop_signal(self):
+        """
+        Handle graceful stop signals. Flush buffer to disk.
+        """
+        if self._blocking_stop:
+            return
+        self._blocking_stop = True
+        if self._tmp_idx_and_buffer.idx:
+            self._save_buffer_to_disk(self._tmp_idx_and_buffer)
+        self._tmp_idx_and_buffer = None
+        while self._buffer_index:
+            buffer = self._buffers.pop(0)
+            v = self._buffer_index.pop(buffer.index)
+            self._save_buffer_to_disk(TempBufferData(idx={buffer.index: v}, buffer=buffer))
+
     @ensure_async_lock(LockType.WRITE)
     async def _clean_temp_buffer(self):
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
@@ -139,12 +154,13 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
 
     async def _teardown(self):
         self._buffers[-1].size and await self._flush_buffer()
+        self._executor.shutdown(wait=True)
 
     def enable_overwrite(self):
         self._overwrite = True
 
     @ensure_async_lock(LockType.WRITE)
-    async def _pop_buffer(self) -> None:
+    async def _pop_buffer(self) -> TempBufferData:
         """
         Remove the buffer from the data queue.
         Put it into the temp storage for disk writing.
@@ -165,26 +181,30 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             )
         self._buffers.append(new_buffer)
         self._buffer_index[new_buffer.index] = OrderedDict()
+        return self._tmp_idx_and_buffer
 
-    def _save_buffer_to_disk(self):
+    def _save_buffer_to_disk(self, buffer_data: TempBufferData):
         """
         Actually saves data from a temp buffer to the target file and position.
         """
-        buffer = self._tmp_idx_and_buffer.buffer
-        assert buffer
-        filename = self._get_filename_by_idx(self._tmp_idx_and_buffer.buffer.index)
+        assert buffer_data.buffer and buffer_data.idx, (buffer_data.buffer, buffer_data.idx)
+        buffer = buffer_data.buffer
+        filename = self._get_filename_by_idx(buffer.index)
         try:
             if buffer.data.startswith(self._genesis_bytes) and \
                     buffer.file_size - buffer.size < self._max_file_size:
                 if Path(filename).exists():
+                    self._stop = True
                     raise exceptions.FilesInconsistencyException(f'File {filename} should not exists.')
 
             elif os.path.getsize(filename) != buffer.file_size - buffer.size:
+                self._stop = True
                 raise exceptions.InvalidDataFileException(f'File {filename} has unexpected size.')
 
             with open(filename, 'ab') as file:
                 file.write(buffer.data)
         except FileNotFoundError:
+            self._stop = True
             raise exceptions.FilesInconsistencyException(f'Missing file {filename}')
 
     async def _flush_buffer(self):
@@ -194,10 +214,11 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         - save_buffer_to_disk: blocking threaded task, non locked
         - clean_temp_buffer: coroutine, locked for writing
         """
-        await self._pop_buffer()
+        buffer = await self._pop_buffer()
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
             self._save_buffer_to_disk,
+            buffer
         )
         await self._clean_temp_buffer()
         self._last_flush = time.time()
@@ -213,7 +234,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
                 file.seek(location.position)
                 return file.read(location.size)
         except FileNotFoundError:
-            raise exceptions.DBNotInitializedException
+            return b''
 
     async def _pre_loop(self):
         if self._last_flush is None:
@@ -302,13 +323,17 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         """
         Destroy the DB, clean the disk.
         """
-        assert not self.running
+        if self.running:
+            raise exceptions.RunningException('Database must be stopped before destroying it')
+        if not self._overwrite:
+            raise exceptions.ReadOnlyDatabaseException
         shutil.rmtree(self.path)
         return True
 
     @ensure_running(True)
-    def destroy_index(self, index: int):
+    async def drop_index(self, index: int):
         """
         Destroy a single index.
         """
-        ...
+        if not self._overwrite:
+            raise exceptions.ReadOnlyDatabaseException
