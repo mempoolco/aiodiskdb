@@ -413,7 +413,7 @@ class AioDiskDB(AsyncRunnable):
             except FileNotFoundError:
                 continue
             with open(file_name, 'rb') as f:
-                f.seek(min(0, file_size - 8))
+                f.seek(max(0, file_size - 8))
                 last_file_bytes = f.read(8)
             snapshot.append(
                 [
