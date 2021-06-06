@@ -1,2 +1,2 @@
 from aiodiskdb.aiodiskdb import AioDiskDB
-from aiodiskdb.types import ItemLocation
+from aiodiskdb.local_types import ItemLocation

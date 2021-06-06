@@ -1,5 +1,5 @@
 from aiodiskdb import exceptions
-from aiodiskdb.types import LockType
+from aiodiskdb.local_types import LockType
 
 
 def ensure_running(expected_state: bool):

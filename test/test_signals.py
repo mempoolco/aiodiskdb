@@ -4,7 +4,7 @@ import os
 from test import AioDiskDBTestCase, run_test_db
 
 
-class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
+class AioDBTestExitSignals(AioDiskDBTestCase):
     def setUp(self, *a, **kw):
         super().setUp(max_file_size=1, max_buffer_size=1)
         self._added_location = None
@@ -23,7 +23,8 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
         self.assertIsNotNone(self._added_location)
         with self.assertRaises(FileNotFoundError):
             os.path.getsize(self._path + '/data00000.dat')
-        self.sut.on_stop_signal()
+        with self.assertRaises(SystemExit):
+            self.sut.on_stop_signal()
         self.sut.on_stop_signal()  # fire it twice, it must be executed once
         self.assertEqual(
             self.sut.GENESIS_BYTES_LENGTH + 4,

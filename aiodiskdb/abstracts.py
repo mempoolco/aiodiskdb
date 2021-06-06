@@ -1,14 +1,14 @@
 import abc
 import asyncio
-import signal
 import time
 
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running, GracefulExit
+from aiodiskdb.local_types import EventsHandlers
 
 
 class AsyncLockable(metaclass=abc.ABCMeta):
-    def __init__(self):
+    def __init__(self, *_, **__):
         super().__init__()
         self._write_lock = asyncio.Lock()
         self._read_lock = asyncio.Lock()
@@ -21,9 +21,19 @@ class AsyncLockable(metaclass=abc.ABCMeta):
         self._reads_count -= 1
 
 
-class AsyncRunnable(metaclass=abc.ABCMeta):
-    def __init__(self, stop_timeout=60):
-        super().__init__()
+class AsyncObservable(metaclass=abc.ABCMeta):
+    def __init__(self, *_, **__):
+        super().__init__(self, *_, **__)
+        self._events = EventsHandlers()
+
+    @property
+    def events(self):
+        return self._events
+
+
+class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
+    def __init__(self, *_, stop_timeout=60, **__):
+        super().__init__(*_, **__)
         self._running = False
         self._error = False
         self._do_stop = False
@@ -31,11 +41,15 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
         self._blocking_stop = False
 
     @abc.abstractmethod
+    def _pre_stop_signal(self):
+        pass  # pragma: no cover
+
     def on_stop_signal(self):
         """
         Non async method. Handle stop signals.
         """
-        pass  # pragma: no cover
+        if self._pre_stop_signal():
+            raise GracefulExit()
 
     @abc.abstractmethod
     async def _pre_loop(self):
@@ -72,12 +86,18 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             self._running = False
             self._error = e
             raise
+        start_fired = False
         while 1:
+            if not start_fired and self.running and self.events.on_start:
+                await self.events.on_start(time.time())
+                start_fired = True
             if self._blocking_stop:
                 break
             try:
                 if self._do_stop:
                     await self._teardown()
+                    self.events.on_stop and \
+                        await self.events.on_stop(time.time())
                     break
                 await self._run_loop()
                 await asyncio.sleep(0.005)
@@ -85,6 +105,8 @@ class AsyncRunnable(metaclass=abc.ABCMeta):
             except Exception as e:
                 self._running = False
                 self._error = e
+                self.events.on_stop and \
+                    await self.events.on_stop(time.time())
                 raise
         self._running = False
 

@@ -9,8 +9,8 @@ import typing
 
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running,  ensure_async_lock
-from aiodiskdb.abstracts import AsyncLockable, AsyncRunnable
-from aiodiskdb.types import ItemLocation, LockType, Buffer, TempBufferData
+from aiodiskdb.abstracts import AsyncRunnable
+from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData
 
 _FILE_SIZE = 128
 _FILE_PREFIX = 'data'
@@ -23,7 +23,7 @@ _TIMEOUT = 30
 _CONCURRENCY = 32
 
 
-class AioDiskDB(AsyncLockable, AsyncRunnable):
+class AioDiskDB(AsyncRunnable):
     GENESIS_BYTES_LENGTH = 4
     """
     Minimal on-disk DB, with buffers and timeouts.
@@ -71,12 +71,12 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
         self._overwrite = overwrite
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
 
-    def on_stop_signal(self):
+    def _pre_stop_signal(self) -> bool:
         """
         Handle graceful stop signals. Flush buffer to disk.
         """
         if self._blocking_stop:
-            return
+            return False
         self._blocking_stop = True
         if self._tmp_idx_and_buffer.idx:
             self._save_buffer_to_disk(self._tmp_idx_and_buffer)
@@ -85,6 +85,7 @@ class AioDiskDB(AsyncLockable, AsyncRunnable):
             buffer = self._buffers.pop(0)
             v = self._buffer_index.pop(buffer.index)
             self._save_buffer_to_disk(TempBufferData(idx={buffer.index: v}, buffer=buffer))
+        return True
 
     @ensure_async_lock(LockType.WRITE)
     async def _clean_temp_buffer(self):

@@ -1,5 +1,5 @@
 import asyncio
-from aiodiskdb.types import ItemLocation
+from aiodiskdb.local_types import ItemLocation
 from test import AioDiskDBTestCase, run_test_db
 
 
