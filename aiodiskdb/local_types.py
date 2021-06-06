@@ -47,7 +47,7 @@ class EventsHandlers:
     on_write: typing.Optional[callable] = None
 
     def __setattr__(self, key, value):
-        if value and not asyncio.iscoroutinefunction(value):
+        if value is not None and not asyncio.iscoroutinefunction(value):
             raise TypeError(f'{key} must be a coroutine')
         self.__dict__[key] = value
 
@@ -56,3 +56,10 @@ class TransactionStatus(Enum):
     INITIALIZED = 1
     ONGOING = 2
     DONE = 3
+
+
+@dataclass
+class WriteEvent:
+    index: int
+    position: int
+    size: int

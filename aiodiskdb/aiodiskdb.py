@@ -10,7 +10,7 @@ import typing
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running,  ensure_async_lock
 from aiodiskdb.abstracts import AsyncRunnable, AioDiskDBTransactionAbstract
-from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData
+from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData, WriteEvent
 
 _FILE_SIZE = 128
 _FILE_PREFIX = 'data'
@@ -225,20 +225,27 @@ class AioDiskDB(AsyncRunnable):
         - clean_temp_buffer: coroutine, locked for writing
         """
         temp_buffer_data = await self._pop_buffer_data()
+        if not temp_buffer_data.buffer.size or temp_buffer_data.buffer.data == self._genesis_bytes:
+            return
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
             self._save_buffer_to_disk,
             temp_buffer_data
         )
         flush_time = time.time()
-        self.events.on_write and asyncio.get_event_loop().create_task(
-            self.events.on_write(
-                flush_time,
-                temp_buffer_data.buffer.index,
-                temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
-                temp_buffer_data.buffer.size
+        if self.events.on_write:
+            position = temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size
+            size = temp_buffer_data.buffer.size
+            asyncio.get_event_loop().create_task(
+                self.events.on_write(
+                    flush_time,
+                    WriteEvent(
+                        index=temp_buffer_data.buffer.index,
+                        position=not position and self.GENESIS_BYTES_LENGTH or position,
+                        size=not position and size - self.GENESIS_BYTES_LENGTH or size
+                    )
+                )
             )
-        )
         await self._clean_temp_buffer()
         self._last_flush = flush_time
 
@@ -353,9 +360,10 @@ class AioDiskDB(AsyncRunnable):
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
         dropped_index_size = 0
-        self.events.on_index_drop and asyncio.get_event_loop().create_task(
-            self.events.on_index_drop(time.time(), index, dropped_index_size)
-        )
+        if self.events.on_index_drop:
+            asyncio.get_event_loop().create_task(
+                self.events.on_index_drop(time.time(), index, dropped_index_size)
+            )
         return dropped_index_size
 
     @ensure_running(False)

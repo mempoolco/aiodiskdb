@@ -56,9 +56,9 @@ await db.stop()
 Be alerted when data is actually persisted to disk:
 
 ```python
-async def callback(timestamp: int, location: ItemLocation):
+async def callback(timestamp: int, event: WriteEvent):
     human_time = datetime.fromtimestamp(timestamp).isoformat()
-    log(f'{human_time} - {location} persisted to disk.')
+    log(f'{human_time} - {event} persisted to disk.')
     await do_something(location)
     
 db.events.on_write = callback
@@ -175,8 +175,6 @@ Inspired by the raw block data storage of the [bitcoincore blocks database](http
 
 ### Notes
 
-**Readme is a design document, some features may not be available yet.**
-
-**Alpha stage. Still under development, use with care, could become sentient and kill anybody.**
+**Alpha stage. Still under development, use with care and expect to loss data.**
 
 Donate :heart: **Bitcoin** to: 3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV or [paypal](https://paypal.me/gdax)

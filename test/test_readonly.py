@@ -30,3 +30,9 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
         await self._run()
         self.sut.enable_overwrite()
         await self.sut.drop_index(99)
+
+    def tearDown(self) -> None:
+        self.assertEqual(1, len(self._index_drops))
+        self.assertIsInstance(self._index_drops[0][0], float)
+        print(self._index_drops)
+        super().tearDown()

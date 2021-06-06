@@ -7,7 +7,7 @@ from collections import OrderedDict
 
 from aiodiskdb import AioDiskDB, exceptions
 from aiodiskdb.abstracts import AioDiskDBTransactionAbstract
-from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation
+from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, WriteEvent
 
 
 class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
@@ -30,14 +30,19 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             temp_buffer_data
         )
         flush_time = time.time()
-        self.session.events.on_write and asyncio.get_event_loop().create_task(
-            self.session.events.on_write(
-                flush_time,
-                temp_buffer_data.buffer.index,
-                temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
-                temp_buffer_data.buffer.size
+        if temp_buffer_data.buffer.data:
+            position = temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size
+            size = temp_buffer_data.buffer.size
+            asyncio.get_event_loop().create_task(
+                self.session.events.on_write(
+                    flush_time,
+                    WriteEvent(
+                        index=temp_buffer_data.buffer.index,
+                        position=not position and self.session.GENESIS_BYTES_LENGTH or position,
+                        size=not position and size - self.session.GENESIS_BYTES_LENGTH or size
+                    )
+                )
             )
-        )
         await self.session._clean_temp_buffer_non_locked()
         self._last_flush = flush_time
 

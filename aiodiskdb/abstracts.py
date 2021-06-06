@@ -80,10 +80,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         """
         loop = asyncio.get_event_loop()
         if self._error:
-            raise ValueError('error state')
-        elif self._running:
-            raise ValueError('already running')
-
+            raise exceptions.InvalidDBStateException('DB previously went in error state')
         try:
             await self._pre_loop()
         except Exception as e:
@@ -105,7 +102,8 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
                 await asyncio.sleep(0.005)
                 self._running = True
             except Exception as e:
-                self.events.on_failure and loop.create_task(self.events.on_failure(time.time()))
+                if self.events.on_failure:
+                    loop.create_task(self.events.on_failure(time.time()))
                 self._running = False
                 self._error = e
                 self.events.on_stop and \
@@ -116,12 +114,9 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
 
     @ensure_running(True)
     async def stop(self):
-        if self._do_stop:
-            raise exceptions.FailedToStopException('Stop already hit')
-        timeout = 60
         stop_at = time.time()
         self._do_stop = True
-        while stop_at - time.time() < timeout:
+        while stop_at - time.time() < self._stop_timeout:
             if not self._running:
                 return True
             await asyncio.sleep(0.1)

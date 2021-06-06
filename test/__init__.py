@@ -1,8 +1,11 @@
 import asyncio
 from unittest import IsolatedAsyncioTestCase
 
+import typing
+
 from aiodiskdb import exceptions
 from aiodiskdb.aiodiskdb import AioDiskDB
+from aiodiskdb.local_types import WriteEvent
 
 
 class AioDiskDBTestCase(IsolatedAsyncioTestCase):
@@ -14,10 +17,37 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
         self._max_file_size = max_file_size
         self._max_buffer_size = max_buffer_size
         self._genesis_bytes = genesis_bytes
+        self._writes = []
+        self._starts = []
+        self._stops = []
+        self._index_drops = []
+        self._failures = []
         self._setup_sut()
         self.sut.destroy_db()
         self._overwrite = overwrite
         self._setup_sut()
+
+    def _hook_events(self):
+        self.sut.events.on_start = self._on_start
+        self.sut.events.on_stop = self._on_stop
+        self.sut.events.on_write = self._on_write
+        self.sut.events.on_index_drop = self._on_index_drop
+        self.sut.events.on_failure = self._on_failure
+
+    async def _on_write(self, timestamp, event: WriteEvent):
+        self._writes.append([timestamp, event])
+
+    async def _on_start(self, timestamp):
+        self._starts.append([timestamp])
+
+    async def _on_stop(self, timestamp):
+        self._stops.append([timestamp])
+
+    async def _on_index_drop(self, timestamp, index: int, size: int):
+        self._index_drops.append([timestamp, index, size])
+
+    async def _on_failure(self, timestamp, exception: typing.Optional[Exception] = None):
+        self._failures.append([timestamp, exception])
 
     def tearDown(self) -> None:
         self.sut.destroy_db()
@@ -32,6 +62,7 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
             overwrite=self._overwrite,
             genesis_bytes=self._genesis_bytes
         )
+        self._hook_events()
 
 
 def run_test_db(f):

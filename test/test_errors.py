@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 from aiodiskdb import exceptions
@@ -14,6 +15,15 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
         b = os.urandom(1024 ** 2 + 1)
         with self.assertRaises(exceptions.WriteFailedException):
             await self.sut.add(b)
+
+    def tearDown(self) -> None:
+        self.assertEqual(1, len(self._stops))
+        self.assertIsInstance(self._stops[0][0], float)
+        self.assertEqual(1, len(self._starts))
+        self.assertIsInstance(self._starts[0][0], float)
+        self.assertEqual(0, len(self._failures))
+        self.assertEqual(0, len(self._writes))
+        super().tearDown()
 
 
 class AioDBTestErrorWrongGenesis(AioDiskDBTestCase):
@@ -44,6 +54,16 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
             for _ in range(0, 100):
                 await self.sut.add(os.urandom(10240))
         self.assertTrue('File /tmp/aiodiskdb_test/data00001.dat should not exists' in str(self.sut._error))
+
+    def tearDown(self):
+        self.assertEqual(1, len(self._stops))
+        self.assertIsInstance(self._stops[0][0], float)
+        self.assertEqual(1, len(self._starts))
+        self.assertIsInstance(self._starts[0][0], float)
+        self.assertEqual(1, len(self._failures))
+        self.assertIsInstance(self._failures[0][0], float)
+        self.assertTrue(self._failures[0][0] - time.time() < 2)
+        super().tearDown()
 
 
 class AioDBTestErrorZeroDBSizeError(AioDiskDBTestCase):

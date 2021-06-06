@@ -60,3 +60,7 @@ class TransactionAlreadyCommittedException(AioDiskDBException):
 
 class PendingSnapshotException(AioDiskDBException):
     pass
+
+
+class InvalidDBStateException(AioDiskDBException):
+    pass

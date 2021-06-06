@@ -18,7 +18,7 @@ class TestAioDiskDBTransaction(AioDiskDBTestCase):
         with open(self._path + '/data00000.dat', 'rb') as f:
             x = f.read()
         self.assertEqual(x, self.sut._genesis_bytes + b'data1data2data3')
-        location1.size += 10
+        location1.size += 10  # increase the location size to read contiguous data
         self.assertEqual(
             b'data1data2data3',
             await self.sut.read(location1)
@@ -69,7 +69,7 @@ class TestAioDiskDBConcurrentTransactions(AioDiskDBTestCase):
             random_transaction = random.randint(0, 10)
             if random_transaction < 3:
                 """
-                Add ~30% of data by transactions
+                Add some data by transactions
                 """
                 transaction = await self.sut.transaction()
                 transactions_data = []
@@ -84,12 +84,15 @@ class TestAioDiskDBConcurrentTransactions(AioDiskDBTestCase):
                 self._writes_count += 1
                 self._transactions += 1
                 for x in zip(locations, transactions_data):
-                    self._data.append(x)
+                    self._data.append(x)  # append [location, data] so the random reads can request it
                     tx_chunk_size = len(x[1])
                     data_stored.setdefault(x[0].index, 0)
                     data_stored[x[0].index] += tx_chunk_size
                     total_size += tx_chunk_size
             else:
+                """
+                Mix normal adds
+                """
                 size = random.randint(1024, 1024 ** 2)
                 sizes.append(size)
                 data = os.urandom(size)
