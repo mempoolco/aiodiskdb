@@ -3,18 +3,19 @@ import time
 from pathlib import Path
 
 from aiodiskdb import exceptions
-from test import AioDiskDBTestCase, run_test_db
+from test import AioDiskDBTestCase
 
 
 class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
     def setUp(self, *a, **kw):
         super().setUp(max_file_size=1, max_buffer_size=1)
 
-    @run_test_db
     async def test(self):
+        await self._run()
         b = os.urandom(1024 ** 2 + 1)
         with self.assertRaises(exceptions.WriteFailedException):
             await self.sut.add(b)
+        await self._stop()
 
     def tearDown(self) -> None:
         self.assertEqual(1, len(self._stops))
@@ -47,8 +48,8 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
         with open(self._path + '/data00001.dat', 'wb') as f:
             f.write(b'aa'*8)
 
-    @run_test_db
     async def test(self):
+        await self._run(expect_failure=True)
         self._corrupt_file()
         with self.assertRaises(exceptions.NotRunningException):
             for _ in range(0, 100):
@@ -67,21 +68,18 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
 
 
 class AioDBTestErrorZeroDBSizeError(AioDiskDBTestCase):
-    @run_test_db
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=0, max_buffer_size=0)
 
 
 class AioDBTestErrorInvalidDBSizeError(AioDiskDBTestCase):
-    @run_test_db
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=2)
 
 
 class AioDBTestErrorInvalidGenesisBytes(AioDiskDBTestCase):
-    @run_test_db
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=1, genesis_bytes=b'testtest')

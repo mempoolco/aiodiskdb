@@ -34,6 +34,7 @@ class AioDiskDB(AsyncRunnable):
             path: str,
             create_if_not_exists: bool = False,
             overwrite: bool = False,
+            clean_stale_data: bool = True,
             file_padding: int = _FILE_ZEROS_PADDING,
             file_prefix: str = _FILE_PREFIX,
             max_file_size: int = _FILE_SIZE,
@@ -70,6 +71,11 @@ class AioDiskDB(AsyncRunnable):
         self._executor = ThreadPoolExecutor(max_workers=concurrency)
         self._overwrite = overwrite
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
+
+        if clean_stale_data:
+            self._apply_snapshot()
+        else:
+            self._ensure_no_pending_snapshot()
 
     def _pre_stop_signal(self) -> bool:
         """
@@ -132,7 +138,6 @@ class AioDiskDB(AsyncRunnable):
     def _get_filename_by_idx(self, idx: int) -> str:
         return f'{self.path}/{self._file_prefix}' + f'{idx}'.zfill(self._file_padding) + '.dat'
 
-    @ensure_running(False)
     async def _setup_current_buffer(self):
         """
         Setup the current buffer, starting from the disk files.
@@ -142,7 +147,7 @@ class AioDiskDB(AsyncRunnable):
         if any(filter(lambda _f: _f.startswith('.transaction-snapshot-'), files)):
             raise exceptions.PendingSnapshotException
 
-        last_file = files and files[-1]
+        last_file = files and list(filter(lambda x: x.startswith(self._file_prefix), files))[-1]
         if not last_file:
             # No previous files found for the current setup. Starting a new database.
             data, curr_size, curr_idx = self._genesis_bytes, self.GENESIS_BYTES_LENGTH, 0
@@ -165,6 +170,9 @@ class AioDiskDB(AsyncRunnable):
 
     def enable_overwrite(self):
         self._overwrite = True
+
+    def disable_overwrite(self):
+        self._overwrite = False
 
     @ensure_async_lock(LockType.WRITE)
     async def _pop_buffer_data(self) -> TempBufferData:
@@ -217,16 +225,21 @@ class AioDiskDB(AsyncRunnable):
             self._stop = True
             raise exceptions.FilesInconsistencyException(f'Missing file {filename}')
 
-    async def _flush_buffer(self):
+    async def _flush_buffer(self, lock=True):
         """
         Trigger blocking\non-blocking operations.
         - pop_buffer: coroutine, locked for writing
         - save_buffer_to_disk: blocking threaded task, non locked
         - clean_temp_buffer: coroutine, locked for writing
         """
-        temp_buffer_data = await self._pop_buffer_data()
+        timestamp = int(time.time())
+        if lock:
+            temp_buffer_data = await self._pop_buffer_data()
+        else:
+            temp_buffer_data = await self._pop_buffer_data_non_locked()
         if not temp_buffer_data.buffer.size or temp_buffer_data.buffer.data == self._genesis_bytes:
             return
+        await self._write_db_snapshot(timestamp, temp_buffer_data.buffer.index)
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
             self._save_buffer_to_disk,
@@ -246,8 +259,13 @@ class AioDiskDB(AsyncRunnable):
                     )
                 )
             )
-        await self._clean_temp_buffer()
+        if lock:
+            await self._clean_temp_buffer()
+        else:
+            await self._clean_temp_buffer_non_locked()
+
         self._last_flush = flush_time
+        await self._clean_db_snapshot(timestamp)
 
     def _process_location_read(self, location: ItemLocation):
         """
@@ -353,28 +371,132 @@ class AioDiskDB(AsyncRunnable):
         return True
 
     @ensure_running(True)
+    @ensure_async_lock(LockType.WRITE)
     async def drop_index(self, index: int) -> int:
         """
         Destroy a single index.
+        Ensures a flush first.
+        If the deleted index is the current one, setup it again from scratch.
         """
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
-        dropped_index_size = 0
+        if self._tmp_idx_and_buffer.buffer:
+            await self._flush_buffer(lock=False)  # The whole method is locked.
+        filename = self._get_filename_by_idx(index)
+        if not Path(filename).exists():
+            raise exceptions.IndexDoesNotExist
+        dropped_index_size = os.path.getsize(filename) - self.GENESIS_BYTES_LENGTH
+        os.remove(filename)
+
+        if self._buffers[-1].index == index:
+            self._buffers = []
+            self._buffer_index.pop(index)
+            await self._setup_current_buffer()
+
         if self.events.on_index_drop:
             asyncio.get_event_loop().create_task(
                 self.events.on_index_drop(time.time(), index, dropped_index_size)
             )
         return dropped_index_size
 
-    @ensure_running(False)
-    async def apply_snapshot(self):
+    @ensure_running(True)
+    async def _write_db_snapshot(self, timestamp: int, *files_indexes: int):
+        """
+        Persist the current status of files before appending data.
+        It will be reverted in case of a commit failure.
+        """
+        filenames = map(self._get_filename_by_idx, files_indexes)
+        snapshot = []
+        for i, file_name in enumerate(filenames):
+            try:
+                file_size = os.path.getsize(file_name)
+            except FileNotFoundError:
+                continue
+            with open(file_name, 'rb') as f:
+                f.seek(min(0, file_size - 8))
+                last_file_bytes = f.read(8)
+            snapshot.append(
+                [
+                    files_indexes[i].to_bytes(6, 'little'),
+                    file_size.to_bytes(6, 'little'),
+                    last_file_bytes
+                ]
+            )
+        sizes = map(
+            lambda x: [x, os.path.getsize(os.path.join(self.path, x))],
+            os.listdir(self.path)
+        )
+        with open(os.path.join(self.path, f'.snapshot-{timestamp}'), 'wb') as f:
+            for s in sizes:
+                filename, size = s
+                data = filename.encode() + b';' + size.to_bytes(4, 'little') + b'\n'
+                f.write(data)
+
+    @ensure_running(True)
+    async def _clean_db_snapshot(self, timestamp: int):
+        """
+        The transaction is successfully committed.
+        The snapshot file must be deleted.
+        """
+        try:
+            os.remove(os.path.join(self.path, f'.snapshot-{timestamp}'))
+        except FileNotFoundError:
+            return
+
+    def _apply_snapshot(self):
         """
         Apply a database snapshot to recover a previous status.
         A snapshot is created before a transaction commit is made.
         Having a snapshot file during the AioDiskDB boot mean that a transaction commit is failed,
         and stale data may exists in the files.
-        Applying the snapshot trim the files to the status saved before the commit operation was started.
+        Applying the snapshot discard all the data added to the files after taking it.
         Stale data is deleted.
         """
-        if not self._overwrite:
-            raise exceptions.ReadOnlyDatabaseException
+        assert not self.running
+        snapshots = list(filter(
+            lambda x: x.startswith('.snapshot-'),
+            os.listdir(self.path)
+        ))
+        if len(snapshots) > 1:
+            # This should NEVER happen.
+            raise exceptions.InvalidDBStateException('Multiple snapshots, unrecoverable error.')
+        if not snapshots:
+            return
+        snapshot_file = snapshots[0]
+        with open(os.path.join(str(self.path), snapshot_file), 'rb') as f:
+            snapshot = f.read()
+        assert snapshot
+        pos = 0
+        files = []
+        while pos < len(snapshot):
+            files.append(
+                [
+                    int.from_bytes(snapshot[pos:pos+6], 'little'),
+                    int.from_bytes(snapshot[pos+6:pos+12], 'little'),
+                    snapshot[pos+12:pos+20]
+                ]
+            )
+            pos += 20
+        for file_data in files:
+            file_id = file_data[0]
+            snapshot_file_size = file_data[1]
+            snapshot_file_last_bytes = file_data[2]
+            with open(self._get_filename_by_idx(file_id), 'r+b') as f:
+                genesis_bytes = f.read(4)
+                if genesis_bytes != self._genesis_bytes:
+                    raise exceptions.InvalidDataFileException('Invalid genesis bytes for file')
+                f.seek(snapshot_file_size - len(snapshot_file_last_bytes))
+                data = f.read(len(snapshot_file_last_bytes))
+                f.seek(0)
+                f.truncate(snapshot_file_size)
+                if data != snapshot_file_last_bytes:
+                    raise exceptions.InvalidDataFileException('File corrupted. Unrecoverable error')
+        os.remove(os.path.join(self.path, snapshot))
+
+    def _ensure_no_pending_snapshot(self):
+        assert not self.running
+        if any(map(
+            lambda x: x.startswith('.snapshot-'),
+            os.listdir(self.path)
+        )):
+            raise exceptions.InvalidDBStateException('Pending snapshot. DB must be cleaned.')

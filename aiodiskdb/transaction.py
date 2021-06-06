@@ -1,5 +1,4 @@
 import asyncio
-import os
 import time
 
 import typing
@@ -96,28 +95,6 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             buffer.file_size += data_size
         return res
 
-    async def _write_db_snapshot(self, timestamp: int):
-        """
-        Persist the current status of files before appending data.
-        It will be reverted in case of a commit failure.
-        """
-        sizes = map(
-            lambda x: [x, os.path.getsize(os.path.join(self.session.path, x))],
-            os.listdir(self.session.path)
-        )
-        with open(os.path.join(self.session.path, f'.transaction-snapshot-{timestamp}'), 'wb') as f:
-            for s in sizes:
-                filename, size = s
-                data = filename.encode() + b';' + size.to_bytes(4, 'little') + b'\n'
-                f.write(data)
-
-    async def _clean_db_snapshot(self, timestamp: int):
-        """
-        The transaction is successfully committed.
-        The snapshot file must be deleted.
-        """
-        os.remove(os.path.join(self.session.path, f'.transaction-snapshot-{timestamp}'))
-
     async def _update_session_buffer(self, temp_buffer_data: TempBufferData):
         """
         This is fired after a Transaction is successfully saved to disk.
@@ -175,7 +152,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         self._status = TransactionStatus.ONGOING
         await self._ensure_flush()
         assert not self.session._buffers[-1].size
-        await self._write_db_snapshot(timestamp)
+        await self.session._write_db_snapshot(timestamp)
         temp_buffers_data = self._bake_temp_buffer_data()
         assert temp_buffers_data
         temp_buffer_data = None
@@ -187,5 +164,5 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             )
         assert temp_buffer_data
         await self._update_session_buffer(temp_buffer_data)
-        await self._clean_db_snapshot(timestamp)
+        await self.session._clean_db_snapshot(timestamp)
         self._status = TransactionStatus.DONE

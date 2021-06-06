@@ -64,3 +64,7 @@ class PendingSnapshotException(AioDiskDBException):
 
 class InvalidDBStateException(AioDiskDBException):
     pass
+
+
+class IndexDoesNotExist(AioDiskDBException):
+    pass

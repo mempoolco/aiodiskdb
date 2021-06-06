@@ -1,6 +1,3 @@
-import asyncio
-import os
-
 from aiodiskdb import exceptions
 from test import AioDiskDBTestCase, run_test_db
 
@@ -8,11 +5,6 @@ from test import AioDiskDBTestCase, run_test_db
 class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
     def setUp(self, *a, **kw):
         super().setUp(max_file_size=1, max_buffer_size=1, overwrite=False)
-
-    async def _run(self):
-        asyncio.get_event_loop().create_task(self.sut.run())
-        while not self.sut.running:
-            await asyncio.sleep(0.1)
 
     @run_test_db
     async def test(self):
@@ -29,10 +21,17 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
         self._setup_sut()
         await self._run()
         self.sut.enable_overwrite()
-        await self.sut.drop_index(99)
+        with self.assertRaises(exceptions.IndexDoesNotExist):
+            await self.sut.drop_index(99)
+        transaction = await self.sut.transaction()
+        transaction.add(b'cafe')
+        await transaction.commit()
+        await self.sut.drop_index(0)
 
     def tearDown(self) -> None:
         self.assertEqual(1, len(self._index_drops))
         self.assertIsInstance(self._index_drops[0][0], float)
+        self.assertEqual(self._index_drops[0][1], 0)  # index
+        self.assertEqual(self._index_drops[0][2], 4)  # length of 'cafe'
         print(self._index_drops)
         super().tearDown()

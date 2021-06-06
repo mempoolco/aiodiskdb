@@ -64,17 +64,30 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
         )
         self._hook_events()
 
+    async def _run(self, expect_failure=False):
+        async def _handle_run():
+            try:
+                await self.sut.run()
+            except:
+                if not expect_failure:
+                    raise
+
+        self.loop.create_task(_handle_run(), name='aiodiskdb_main_loop')
+        while not self.sut.running:
+            await asyncio.sleep(0.01)
+
+    async def _stop(self):
+        await self.sut.stop()
+
 
 def run_test_db(f):
     async def _decorator(self, *a, **kw):
         try:
-            self.loop.create_task(self.sut.run(), name='aiodiskdb_main_loop')
-            while not self.sut.running:
-                await asyncio.sleep(0.01)
+            await self._run()
             return await f(self, *a, **kw)
         finally:
             try:
-                await self.sut.stop()
+                await self._stop()
             except exceptions.NotRunningException:
                 print('run_test_db requested to shutdown a not running database')
     return _decorator
