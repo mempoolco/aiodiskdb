@@ -63,13 +63,12 @@ async def callback(location: ItemLocation):
 db.events.on_write = callback
 ```
 
-Or hook to many other events:
+Or hook to other events:
 ```python
 db.events.on_start = ...
 db.events.on_stop = ...
 db.events.on_failure = ...
-db.events.on_destroy_db = ...
-db.events.on_destroy_index = ...
+db.events.on_index_drop = ...
 ```
 
 ### Asynchronous non-blocking
@@ -161,6 +160,8 @@ Avg file size: 1.0kB
 
 Inspired by the raw block data storage of the [bitcoincore blocks database](https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_2):_Data_Storage).
 
-**Still under development, use with care, could become sentient and kill anybody.**
+**Readme is a design document, some features may not be available yet.**
+
+**Alpha stage. Still under development, use with care, could become sentient and kill anybody.**
 
 Donate :heart: **Bitcoin** to: 3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV or [paypal](https://paypal.me/gdax)

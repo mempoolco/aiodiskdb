@@ -8,11 +8,12 @@ from aiodiskdb.aiodiskdb import AioDiskDB
 class AioDiskDBTestCase(IsolatedAsyncioTestCase):
     _path = '/tmp/aiodiskdb_test'
 
-    def setUp(self, max_file_size=128, max_buffer_size=16, overwrite=True):
+    def setUp(self, max_file_size=128, max_buffer_size=16, overwrite=True, genesis_bytes=b'test'):
         self.loop = asyncio.get_event_loop()
         self._overwrite = True
         self._max_file_size = max_file_size
         self._max_buffer_size = max_buffer_size
+        self._genesis_bytes = genesis_bytes
         self._setup_sut()
         self.sut.destroy_db()
         self._overwrite = overwrite
@@ -28,7 +29,8 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
             read_timeout=5,
             max_file_size=self._max_file_size,
             max_buffer_size=self._max_buffer_size,
-            overwrite=self._overwrite
+            overwrite=self._overwrite,
+            genesis_bytes=self._genesis_bytes
         )
 
 

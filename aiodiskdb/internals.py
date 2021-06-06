@@ -31,10 +31,12 @@ def ensure_async_lock(lock_type: LockType):
                     self._read_lock.release()
             elif lock_type == LockType.WRITE:
                 await self._write_lock.acquire()
+                await self._transaction_lock.acquire()
                 try:
                     return await f(self, *a, **kw)
                 finally:
                     self._write_lock.release()
+                    self._transaction_lock.release()
             else:
                 raise ValueError('Value must be LockType.READ or WRITE')
         return _ensure

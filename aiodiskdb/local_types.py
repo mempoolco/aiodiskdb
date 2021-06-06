@@ -4,8 +4,6 @@ from dataclasses import dataclass
 import typing
 from enum import Enum
 
-from aiodiskdb import exceptions
-
 
 @dataclass
 class ItemLocation:
@@ -36,11 +34,16 @@ class TempBufferData:
 
 @dataclass
 class EventsHandlers:
+    """
+    Callback signature, first argument is always the execution timestamp (time.time()).
+
+    async def callback(fired_at: int, *callback_data):
+        pass
+    """
     on_start: typing.Optional[callable] = None
     on_stop: typing.Optional[callable] = None
     on_failure: typing.Optional[callable] = None
-    on_destroy_db: typing.Optional[callable] = None
-    on_destroy_index: typing.Optional[callable] = None
+    on_index_drop: typing.Optional[callable] = None
     on_write: typing.Optional[callable] = None
 
     def __setattr__(self, key, value):

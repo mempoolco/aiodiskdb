@@ -59,3 +59,9 @@ class AioDBTestErrorInvalidDBSizeError(AioDiskDBTestCase):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=2)
 
+
+class AioDBTestErrorInvalidGenesisBytes(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(max_file_size=1, max_buffer_size=1, genesis_bytes=b'testtest')

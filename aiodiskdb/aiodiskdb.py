@@ -60,7 +60,7 @@ class AioDiskDB(AsyncRunnable):
         self._max_buffer_size = int(float(max_buffer_size) * 1024 ** 2)
         self._flush_interval = int(flush_interval)
         if len(genesis_bytes) != self.GENESIS_BYTES_LENGTH:
-            raise ValueError('Genesis bytes length must be 4')
+            raise exceptions.InvalidConfigurationException('Genesis bytes length must be 4')
         self._genesis_bytes = genesis_bytes
         self._read_timeout = int(read_timeout)
         self._write_timeout = int(write_timeout)
@@ -161,7 +161,7 @@ class AioDiskDB(AsyncRunnable):
         self._overwrite = True
 
     @ensure_async_lock(LockType.WRITE)
-    async def _pop_buffer(self) -> TempBufferData:
+    async def _pop_buffer_data(self) -> TempBufferData:
         """
         Remove the buffer from the data queue.
         Put it into the temp storage for disk writing.
@@ -215,14 +215,23 @@ class AioDiskDB(AsyncRunnable):
         - save_buffer_to_disk: blocking threaded task, non locked
         - clean_temp_buffer: coroutine, locked for writing
         """
-        buffer = await self._pop_buffer()
+        temp_buffer_data = await self._pop_buffer_data()
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
             self._save_buffer_to_disk,
-            buffer
+            temp_buffer_data
+        )
+        flush_time = time.time()
+        self.events.on_write and asyncio.get_event_loop().create_task(
+            self.events.on_write(
+                flush_time,
+                temp_buffer_data.buffer.index,
+                temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
+                temp_buffer_data.buffer.size
+            )
         )
         await self._clean_temp_buffer()
-        self._last_flush = time.time()
+        self._last_flush = flush_time
 
     def _process_location_read(self, location: ItemLocation):
         """
@@ -338,3 +347,7 @@ class AioDiskDB(AsyncRunnable):
         """
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
+        dropped_index_size = 0
+        self.events.on_index_drop and asyncio.get_event_loop().create_task(
+            self.events.on_index_drop(time.time(), index, dropped_index_size)
+        )

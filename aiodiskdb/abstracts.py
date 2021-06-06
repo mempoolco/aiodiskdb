@@ -11,6 +11,7 @@ class AsyncLockable(metaclass=abc.ABCMeta):
     def __init__(self, *_, **__):
         super().__init__()
         self._write_lock = asyncio.Lock()
+        self._transaction_lock = asyncio.Lock()
         self._read_lock = asyncio.Lock()
         self._reads_count = 0
 
@@ -75,6 +76,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         loop.create_task(instance.run())
         loop.run_until_complete()
         """
+        loop = asyncio.get_event_loop()
         if self._error:
             raise ValueError('error state')
         elif self._running:
@@ -89,25 +91,25 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         start_fired = False
         while 1:
             if not start_fired and self.running and self.events.on_start:
-                await self.events.on_start(time.time())
+                loop.create_task(self.events.on_start(time.time()))
                 start_fired = True
             if self._blocking_stop:
                 break
             try:
                 if self._do_stop:
                     await self._teardown()
-                    self.events.on_stop and \
-                        await self.events.on_stop(time.time())
                     break
                 await self._run_loop()
                 await asyncio.sleep(0.005)
                 self._running = True
             except Exception as e:
+                self.events.on_failure and loop.create_task(self.events.on_failure(time.time()))
                 self._running = False
                 self._error = e
                 self.events.on_stop and \
-                    await self.events.on_stop(time.time())
+                    loop.create_task(self.events.on_stop(time.time()))
                 raise
+        self.events.on_stop and loop.create_task(self.events.on_stop(time.time()))
         self._running = False
 
     @ensure_running(True)
