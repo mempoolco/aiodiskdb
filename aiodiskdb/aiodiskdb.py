@@ -271,7 +271,7 @@ class AioDiskDB(AsyncRunnable):
         filename = self._get_filename_by_idx(buffer.index)
         try:
             if buffer.data.startswith(self._genesis_bytes) and \
-                    buffer.file_size - buffer.size < self._max_file_size:
+                    buffer.file_size - buffer.size <= self._file_header_size:
                 if Path(filename).exists():
                     self._stop = True
                     raise exceptions.FilesInconsistencyException(f'File {filename} should not exists.')
@@ -622,7 +622,7 @@ class AioDiskDB(AsyncRunnable):
             raise exceptions.IndexDoesNotExist
 
     async def _do_rtrim(self, index: int, trim_from: int, safety_check) -> int:
-        if index <= 0:
+        if index < 0:
             raise exceptions.InvalidDataFileException('Index must be > 0')
         if self._tmp_idx_and_buffer.buffer:
             await self._flush_buffer(lock=False)  # The whole method is locked.
