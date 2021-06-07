@@ -165,9 +165,25 @@ Avg file size: 1.0kB
 
 ### Not-so-append-only
 
-**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries. However, indexes can be truncated, resulting a bulk delete of multiple locations.
+**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries.
 
-With a combination of the `transaction` and `index_drop` or `rpop` methods, data pruning can be implemented.
+Data pruning is supported with the following methods:
+
+```python
+db.enable_overwrite()
+db.rtrim(0, 400)
+db.ltrim(8, 900)
+db.drop_index(3)
+db.disable_overwrite()
+```
+
+These three methods respectively:
+- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`()
+- prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
+- drop the whole index `3`, resulting in a file deletion: `drop_index`
+
+All the items locations not involved into a TRIM operation remains unmodified, even with an `ltrim`.
+
 
 
 ### Limitations
