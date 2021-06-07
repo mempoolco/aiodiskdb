@@ -21,8 +21,6 @@ To be used in the `asyncio` event loop.
 pip install aiodiskdb
 ```
 
-![aiodiskdb files](./docs/aiodiskdb.gif)
-
 ### Usage
 
 Start the DB by fire and forget:
@@ -145,6 +143,8 @@ signal.signal(signal.SIGKILL, db.on_stop_signal)
 
 ### Quite enough fast for some use cases
 
+![aiodiskdb files](./docs/aiodiskdb.gif)
+
 Concurrency tests, part of the unit tests, can be replicated as system benchmark.
 The following are performed on a common consumer SSD:
 ```
@@ -180,7 +180,8 @@ assert len(data) <= max_buffer_size
 assert max_transaction_size < RAM
 ```
 
-So, if, you have a max_buffer_size of 16 MB, you can't store a 20 MB file size in the DB.
+So, if, you have a max_buffer_size of 16 MB, you can't store a single 20 MB blob in the DB and must
+shrink it.
 
 
 ---

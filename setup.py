@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='aiodiskdb',
-    version='0.0.2',
+    version='1.0a1',
     url='https://github.com/mempoolco/aiodiskdb/',
     license='MIT',
     author='Guido Dassori',
