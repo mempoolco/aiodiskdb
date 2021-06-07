@@ -30,4 +30,4 @@ class TestSnapshots(AioDiskDBTestCase):
         await self._stop()
         with open(self._path + '/data00000.dat', 'rb') as f:
             x = f.read()
-        self.assertEqual(x, self.sut._get_new_file_header() + data)
+        self.assertEqual(x, self.sut._bake_new_file_header() + data)

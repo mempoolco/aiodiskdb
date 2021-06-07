@@ -24,6 +24,8 @@ class Buffer:
     size: int
     items: int
     file_size: int
+    offset: int
+    head: bool
 
 
 @dataclass

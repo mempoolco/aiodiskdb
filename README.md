@@ -178,7 +178,7 @@ db.disable_overwrite()
 ```
 
 These three methods respectively:
-- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`()
+- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`)
 - prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
 - drop the whole index `3`, resulting in a file deletion: `drop_index`
 
@@ -188,18 +188,10 @@ All the items locations not involved into a TRIM operation remains unmodified, e
 
 ### Limitations
 
-Simply put, from developer to developer,
-the following are the known limitations:
-
 ```python
 assert len(data) <= max_buffer_size
 assert max_transaction_size < RAM
 ```
-
-So, if, you have a max_buffer_size of 16 MB, you can't store a single 20 MB blob in the DB and must
-shrink it.
-
-
 ---
 
 ### Credits
@@ -210,6 +202,6 @@ Logo by mepheesto.
 
 ### Notes
 
-**Alpha stage. Still under development, use with care and expect to loss data.**
+**Alpha stage. Still under development, use with care and expect data losses.**
 
 Donate :heart: **Bitcoin** to: 3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV or [paypal](https://paypal.me/gdax)

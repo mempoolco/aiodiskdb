@@ -105,12 +105,18 @@ class AioDiskDB(AsyncRunnable):
 
         return _hash
 
-    def _get_new_file_header(self):
+    def _bake_new_file_header(self) -> bytes:
+        """
+        Bake a fresh file header for a new database file.
+        """
         return self._genesis_bytes + \
                int(0).to_bytes(self.HEADER_TRIM_OFFSET, 'little') + \
                int(0).to_bytes(self.RESERVED_HEADER_LENGTH, 'little')
 
     def _read_file_header(self, f: typing.IO):
+        """
+        Read the first bytes of a file, and return the FileHeader
+        """
         f.seek(0)
         header = f.read(self._file_header_size)
         if not self._is_file_header(header):
@@ -124,15 +130,24 @@ class AioDiskDB(AsyncRunnable):
         )
 
     def _bake_new_buffer(self, index: int):
+        """
+        Bake a fresh buffer, for a new database file.
+        """
         return Buffer(
             index=index,
-            data=self._get_new_file_header(),
-            size=self._file_header_size,
+            data=b'',
+            size=0,
             items=0,
-            file_size=self._file_header_size
+            file_size=0,
+            offset=0,
+            head=True
         )
 
     async def _refresh_current_buffer(self):
+        """
+        Reload the current session buffer from the system state.
+        To be used after a transaction or an index change (trim\drop).
+        """
         self._buffer_index.pop(self._buffers[-1].index)
         self._buffers = []
         await self._setup_current_buffer()
@@ -158,6 +173,9 @@ class AioDiskDB(AsyncRunnable):
         await self._clean_temp_buffer_non_locked()
 
     async def _clean_temp_buffer_non_locked(self):
+        """
+        Cleanup the current temp buffer. Unload the RAM, to be triggered after a disk flush.
+        """
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
 
     def _read_data_from_buffer(self, location: ItemLocation):
@@ -171,8 +189,8 @@ class AioDiskDB(AsyncRunnable):
         except KeyError:
             return None
 
-        offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
-        relative_position = location.position - offset
+        buffer_shift = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
+        relative_position = location.position - buffer_shift
         data = buffer.data[relative_position: relative_position + location.size]
         assert len(data) == location.size, f'{len(data)} != {location.size}'
         return data
@@ -189,8 +207,8 @@ class AioDiskDB(AsyncRunnable):
 
         buffer = self._tmp_idx_and_buffer.buffer
         # just ensures the idx was previously saved, the temp buffer is flat.
-        offset = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
-        relative_position = location.position - offset
+        buffer_shift = 0 if buffer.size == buffer.file_size else buffer.file_size - buffer.size
+        relative_position = location.position - buffer_shift
         data = idx is not None and buffer.data[relative_position:relative_position + location.size] or None
         assert data is not None and len(data) == location.size or data is None
         return data
@@ -208,21 +226,26 @@ class AioDiskDB(AsyncRunnable):
         if any(filter(lambda _f: _f.startswith('.transaction-snapshot-'), files)):
             raise exceptions.PendingSnapshotException
 
-        last_file = files and list(filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files))[-1]
+        last_file = files and list(
+            filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files)
+        )[-1]
         if not last_file:
             # No previous files found for the current setup. Starting a new database.
             buffer = self._bake_new_buffer(0)
-            curr_idx = 0
+            offset, curr_idx = 0, 0
         else:
             curr_idx = int(last_file.replace(self._file_prefix, '').replace('.dat', ''))
             filename = self._get_filename_by_idx(curr_idx)
             curr_size = os.path.getsize(filename)
             with open(filename, 'rb') as f:
                 header = self._read_file_header(f)
-                if header.genesis_bytes != self._genesis_bytes:
-                    raise exceptions.InvalidDataFileException('invalid genesis bytes')
+                offset = header.trim_offset
             data = b''
-            buffer = Buffer(index=curr_idx, data=data, size=len(data), items=0, file_size=curr_size)
+            buffer = Buffer(
+                index=curr_idx, data=data, size=len(data),
+                items=0, file_size=curr_size, offset=offset,
+                head=False
+            )
         self._buffers.append(buffer)
         self._buffer_index[curr_idx] = OrderedDict()
 
@@ -256,7 +279,8 @@ class AioDiskDB(AsyncRunnable):
         else:
             new_buffer = Buffer(
                 index=buffer.index, data=b'',
-                size=0, items=0, file_size=buffer.file_size
+                size=0, items=0, file_size=buffer.file_size,
+                offset=buffer.offset, head=False
             )
         self._buffers.append(new_buffer)
         self._buffer_index[new_buffer.index] = OrderedDict()
@@ -270,23 +294,27 @@ class AioDiskDB(AsyncRunnable):
         buffer = buffer_data.buffer
         filename = self._get_filename_by_idx(buffer.index)
         try:
-            if buffer.data.startswith(self._genesis_bytes) and \
-                    buffer.file_size - buffer.size <= self._file_header_size:
+            if buffer.head:
                 if Path(filename).exists():
                     self._stop = True
                     raise exceptions.FilesInconsistencyException(f'File {filename} should not exists.')
 
-            elif os.path.getsize(filename) != buffer.file_size - buffer.size:
+            elif os.path.getsize(filename) != buffer.file_size - buffer.size + self._file_header_size:
                 self._stop = True
                 raise exceptions.InvalidDataFileException(f'File {filename} has unexpected size.')
 
             with open(filename, 'ab') as file:
+                if buffer.head:
+                    file.write(self._bake_new_file_header())
                 file.write(buffer.data)
         except FileNotFoundError:
             self._stop = True
             raise exceptions.FilesInconsistencyException(f'Missing file {filename}')
 
     def _is_file_header(self, data: bytes) -> bool:
+        """
+        Verify the header correctness
+        """
         if len(data) != self._file_header_size:
             return False
         p2 = self.GENESIS_BYTES_LENGTH + self.HEADER_TRIM_OFFSET
@@ -312,7 +340,7 @@ class AioDiskDB(AsyncRunnable):
             temp_buffer_data = await self._pop_buffer_data()
         else:
             temp_buffer_data = await self._pop_buffer_data_non_locked()
-        if not temp_buffer_data.buffer.size or self._is_file_header(temp_buffer_data.buffer.data):
+        if not temp_buffer_data.buffer.size:
             return
         await self._write_db_snapshot(timestamp, temp_buffer_data.buffer.index)
         await asyncio.get_event_loop().run_in_executor(
@@ -322,15 +350,14 @@ class AioDiskDB(AsyncRunnable):
         )
         flush_time = time.time()
         if self.events.on_write:
-            position = temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size
-            size = temp_buffer_data.buffer.size
+            offset = temp_buffer_data.buffer.offset
             asyncio.get_event_loop().create_task(
                 self.events.on_write(
                     flush_time,
                     WriteEvent(
                         index=temp_buffer_data.buffer.index,
-                        position=not position and self._file_header_size or position,
-                        size=not position and size - self._file_header_size or size
+                        position=temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
+                        size=temp_buffer_data.buffer.size
                     )
                 )
             )
@@ -349,7 +376,8 @@ class AioDiskDB(AsyncRunnable):
         try:
             filename = self._get_filename_by_idx(location.index)
             with open(filename, 'rb') as file:
-                file.seek(location.position)
+                header = self._read_file_header(file)
+                file.seek(self._file_header_size + location.position - header.trim_offset)
                 read = file.read(location.size)
             return read or None
         except FileNotFoundError:
@@ -382,7 +410,7 @@ class AioDiskDB(AsyncRunnable):
         if not data:
             raise exceptions.EmptyPayloadException
         s = time.time()
-        while self._buffers[-1].file_size >= self._max_file_size \
+        while self._buffers[-1].file_size + self._buffers[-1].offset >= self._max_file_size \
                 or self._buffers[-1].size >= self._max_buffer_size:
             # wait for the LRT to shift the buffers
             await asyncio.sleep(0.01)
@@ -639,11 +667,11 @@ class AioDiskDB(AsyncRunnable):
 
         pre_trim_file_size = os.path.getsize(filename)
         with open(filename, 'r+b') as f:
-            f.seek(trim_from)
+            f.seek(trim_from + self._file_header_size)
             if safety_check:
                 if safety_check != f.read(len(safety_check)):
                     raise exceptions.InvalidTrimCommandException('safety check failed')
-            f.seek(trim_from)
+            f.seek(trim_from + self._file_header_size)
             f.truncate()
         file_size = os.path.getsize(filename)
         if self._buffers[-1].index == index:

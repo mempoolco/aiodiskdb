@@ -30,15 +30,13 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         )
         flush_time = time.time()
         if temp_buffer_data.buffer.data:
-            position = temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size
-            size = temp_buffer_data.buffer.size
             asyncio.get_event_loop().create_task(
                 self.session.events.on_write(
                     flush_time,
                     WriteEvent(
                         index=temp_buffer_data.buffer.index,
-                        position=not position and self.session._file_header_size or position,
-                        size=not position and size - self.session._file_header_size or size
+                        position=temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
+                        size=temp_buffer_data.buffer.size
                     )
                 )
             )
@@ -96,6 +94,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         """
         temp_buffer_data.buffer.data = b''
         temp_buffer_data.buffer.size = 0
+        temp_buffer_data.buffer.head = not temp_buffer_data.buffer.file_size
         self.session._buffers[-1] = temp_buffer_data.buffer
         self.session._buffer_index = OrderedDict({temp_buffer_data.buffer.index: dict()})
 
