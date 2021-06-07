@@ -37,8 +37,8 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
                     flush_time,
                     WriteEvent(
                         index=temp_buffer_data.buffer.index,
-                        position=not position and self.session.GENESIS_BYTES_LENGTH or position,
-                        size=not position and size - self.session.GENESIS_BYTES_LENGTH or size
+                        position=not position and self.session._file_header_size or position,
+                        size=not position and size - self.session._file_header_size or size
                     )
                 )
             )
@@ -53,13 +53,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         new_idx = res[-1].buffer.index + 1
         res.append(
             TempBufferData(
-                buffer=Buffer(
-                    index=new_idx,
-                    size=self.session.GENESIS_BYTES_LENGTH,
-                    items=0,
-                    file_size=self.session.GENESIS_BYTES_LENGTH,
-                    data=self.session._genesis_bytes,
-                ),
+                self.session._bake_new_buffer(new_idx),
                 idx={new_idx: dict()}
             )
         )

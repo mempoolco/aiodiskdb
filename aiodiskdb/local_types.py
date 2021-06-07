@@ -63,3 +63,9 @@ class WriteEvent:
     index: int
     position: int
     size: int
+
+
+@dataclass
+class FileHeader:
+    genesis_bytes: bytes
+    trim_offset: int

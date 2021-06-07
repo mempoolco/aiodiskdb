@@ -11,7 +11,7 @@ import typing
 from aiodiskdb import exceptions
 from aiodiskdb.internals import ensure_running,  ensure_async_lock
 from aiodiskdb.abstracts import AsyncRunnable, AioDiskDBTransactionAbstract
-from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData, WriteEvent
+from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData, WriteEvent, FileHeader
 
 _FILE_SIZE = 128
 _FILE_PREFIX = 'data'
@@ -87,7 +87,7 @@ class AioDiskDB(AsyncRunnable):
         if max_file_size > _max_accepted_file_size:
             raise exceptions.InvalidConfigurationException(f'max file size is {_max_accepted_file_size}b')
 
-    def _hash_file(self, f: typing.BinaryIO) -> typing.Optional[bytes]:
+    def _hash_file(self, f: typing.IO) -> typing.Optional[bytes]:
         """
         Hash files chunk by chunk, avoid to load the whole file in RAM.
         """
@@ -110,6 +110,19 @@ class AioDiskDB(AsyncRunnable):
                int(0).to_bytes(self.HEADER_TRIM_OFFSET, 'little') + \
                int(0).to_bytes(self.RESERVED_HEADER_LENGTH, 'little')
 
+    def _read_file_header(self, f: typing.IO):
+        f.seek(0)
+        header = f.read(self._file_header_size)
+        if not self._is_file_header(header):
+            raise exceptions.InvalidDataFileException
+        return FileHeader(
+            genesis_bytes=self._genesis_bytes,
+            trim_offset=int.from_bytes(
+                header[self.GENESIS_BYTES_LENGTH:self.GENESIS_BYTES_LENGTH+self.HEADER_TRIM_OFFSET],
+                'little'
+            )
+        )
+
     def _bake_new_buffer(self, index: int):
         return Buffer(
             index=index,
@@ -120,8 +133,8 @@ class AioDiskDB(AsyncRunnable):
         )
 
     async def _refresh_current_buffer(self):
-        self._buffers = []
         self._buffer_index.pop(self._buffers[-1].index)
+        self._buffers = []
         await self._setup_current_buffer()
 
     def _pre_stop_signal(self) -> bool:
@@ -195,7 +208,7 @@ class AioDiskDB(AsyncRunnable):
         if any(filter(lambda _f: _f.startswith('.transaction-snapshot-'), files)):
             raise exceptions.PendingSnapshotException
 
-        last_file = files and list(filter(lambda x: x.startswith(self._file_prefix), files))[-1]
+        last_file = files and list(filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files))[-1]
         if not last_file:
             # No previous files found for the current setup. Starting a new database.
             buffer = self._bake_new_buffer(0)
@@ -205,8 +218,9 @@ class AioDiskDB(AsyncRunnable):
             filename = self._get_filename_by_idx(curr_idx)
             curr_size = os.path.getsize(filename)
             with open(filename, 'rb') as f:
-                if f.read(4) != self._genesis_bytes:
-                    raise exceptions.InvalidDataFileException
+                header = self._read_file_header(f)
+                if header.genesis_bytes != self._genesis_bytes:
+                    raise exceptions.InvalidDataFileException('invalid genesis bytes')
             data = b''
             buffer = Buffer(index=curr_idx, data=data, size=len(data), items=0, file_size=curr_size)
         self._buffers.append(buffer)
@@ -276,13 +290,15 @@ class AioDiskDB(AsyncRunnable):
         if len(data) != self._file_header_size:
             return False
         p2 = self.GENESIS_BYTES_LENGTH + self.HEADER_TRIM_OFFSET
-        return bool(
-            data[:self.GENESIS_BYTES_LENGTH] == self._genesis_bytes and
-            int.from_bytes(
+        if not data[:self.GENESIS_BYTES_LENGTH] == self._genesis_bytes:
+            return False
+        if not int.from_bytes(
                 data[self.GENESIS_BYTES_LENGTH:p2], 'little'
-            ) < self._max_file_size - self._file_header_size and
-            data[p2:p2+self.RESERVED_HEADER_LENGTH] == int(0).to_bytes(self.RESERVED_HEADER_LENGTH, 'little')
-        )
+        ) < self._max_file_size - self._file_header_size:
+            return False
+        if not data[p2:p2+self.RESERVED_HEADER_LENGTH] == int(0).to_bytes(self.RESERVED_HEADER_LENGTH, 'little'):
+            return False
+        return True
 
     async def _flush_buffer(self, lock=True):
         """
