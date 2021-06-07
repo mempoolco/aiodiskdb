@@ -2,11 +2,13 @@ from aiodiskdb import exceptions
 from aiodiskdb.local_types import LockType
 
 
-def ensure_running(expected_state: bool):
+def ensure_running(expected_state: bool, allow_stop_state=False):
     def _decorator(f):
         async def _ensure(self, *a, **kw):
+            if expected_state and self._do_stop and not allow_stop_state:
+                raise exceptions.NotRunningException('Database is in STOP state')
             if self.running != expected_state:
-                raise exceptions.NotRunningException
+                raise exceptions.NotRunningException('Database it not running')
             return await f(self, *a, **kw)
         return _ensure
     return _decorator

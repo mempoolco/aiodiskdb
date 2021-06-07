@@ -35,12 +35,12 @@ class AsyncObservable(metaclass=abc.ABCMeta):
 
 
 class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
-    def __init__(self, *_, stop_timeout=60, **__):
+    def __init__(self, *_, timeout=0, **__):
         super().__init__(*_, **__)
         self._running = False
         self._error = False
         self._do_stop = False
-        self._stop_timeout = stop_timeout
+        self._timeout = timeout
         self._blocking_stop = False
 
     @abc.abstractmethod
@@ -114,13 +114,13 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
 
     @ensure_running(True)
     async def stop(self):
-        stop_at = time.time()
+        stop_requested_at = time.time()
         self._do_stop = True
-        while stop_at - time.time() < self._stop_timeout:
+        while time.time() - stop_requested_at < self._timeout:
             if not self._running:
                 return True
             await asyncio.sleep(0.1)
-        raise exceptions.FailedToStopException(f'Loop is still running after {self._stop_timeout} seconds')
+        raise exceptions.TimeoutException(f'Loop is still running after {self._timeout} seconds')
 
 
 class AioDiskDBTransactionAbstract(metaclass=abc.ABCMeta):

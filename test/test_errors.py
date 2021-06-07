@@ -49,12 +49,14 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
             f.write(b'aa'*8)
 
     async def test(self):
-        await self._run(expect_failure=True)
+        await self._run(expect_failure='data00001.dat should not exists')
         self._corrupt_file()
         with self.assertRaises(exceptions.NotRunningException):
             for _ in range(0, 100):
                 await self.sut.add(os.urandom(10240))
-        self.assertTrue('File /tmp/aiodiskdb_test/data00001.dat should not exists' in str(self.sut._error))
+        with self.assertRaises(exceptions.InvalidDBStateException) as e:
+            await self.sut.run()
+        self.assertTrue('previously went in error state' in str(e.exception))
 
     def tearDown(self):
         self.assertEqual(1, len(self._stops))
@@ -83,3 +85,29 @@ class AioDBTestErrorInvalidGenesisBytes(AioDiskDBTestCase):
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=1, genesis_bytes=b'testtest')
+
+
+class AioDBTestErrorDBRestartedAfterError(AioDiskDBTestCase):
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(max_file_size=1, max_buffer_size=1, genesis_bytes=b'testtest')
+
+
+class AioDBTestStopTimeoutError(AioDiskDBTestCase):
+    def setUp(self, *a, **kw):
+        super().setUp(max_file_size=1, max_buffer_size=1, timeout=1)
+
+    async def _fail_flush(self):
+        try:
+            await self.sut._flush_buffer()
+        except exceptions.NotRunningException as e:
+            print('Expected exception raised:', str(e))
+
+    async def test(self):
+        await self._run(expect_failure='wrong state, cannot recover. buffer lost.')
+        await self.sut.add(b'a')
+        await self.sut._write_lock.acquire()
+        self.loop.create_task(self._fail_flush())
+        with self.assertRaises(exceptions.TimeoutException):
+            await self.sut.stop()
+        self.sut._write_lock.release()

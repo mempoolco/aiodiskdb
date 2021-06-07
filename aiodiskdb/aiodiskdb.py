@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import shutil
 from collections import OrderedDict
@@ -42,11 +43,12 @@ class AioDiskDB(AsyncRunnable):
             max_buffer_size: int = _BUFFER_SIZE,
             flush_interval: int = _FLUSH_INTERVAL,
             genesis_bytes: bytes = _GENESIS_BYTES,
-            read_timeout: int = _TIMEOUT,
-            write_timeout: int = _TIMEOUT,
+            timeout: int = _TIMEOUT,
             concurrency: int = _CONCURRENCY
     ):
         super().__init__()
+        if not file_prefix.isalpha():
+            raise exceptions.InvalidConfigurationException('Wrong file prefix (must be alphabetic string)')
         self.path = Path(path)
         if create_if_not_exists:
             self.path.mkdir(parents=True, exist_ok=True)
@@ -63,19 +65,36 @@ class AioDiskDB(AsyncRunnable):
         if len(genesis_bytes) != self.GENESIS_BYTES_LENGTH:
             raise exceptions.InvalidConfigurationException('Genesis bytes length must be 4')
         self._genesis_bytes = genesis_bytes
-        self._read_timeout = int(read_timeout)
-        self._write_timeout = int(write_timeout)
+        self._timeout = int(timeout)
         self._buffer_index = OrderedDict()
         self._buffers: typing.List[Buffer] = list()
         self._last_flush = None
         self._executor = ThreadPoolExecutor(max_workers=concurrency)
         self._overwrite = overwrite
         self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
-
         if clean_stale_data:
+            self._drop_existing_temp_files()
             self._apply_snapshot()
         else:
             self._ensure_no_pending_snapshot()
+
+    def _hash_file(self, f: typing.BinaryIO) -> typing.Optional[bytes]:
+        """
+        Hash files chunk by chunk, avoid to load the whole file in RAM.
+        """
+        i = 0
+        chunk_size = 1024 ** 2
+        _hash = None
+        while 1:
+            f.seek(i)
+            c = f.read(chunk_size)
+            if not c:
+                break
+            i += chunk_size
+            _hash = hashlib.sha256().digest()
+            f.seek(0)
+
+        return _hash
 
     def _pre_stop_signal(self) -> bool:
         """
@@ -135,8 +154,9 @@ class AioDiskDB(AsyncRunnable):
         assert data is not None and len(data) == location.size or data is None
         return data
 
-    def _get_filename_by_idx(self, idx: int) -> str:
-        return f'{self.path}/{self._file_prefix}' + f'{idx}'.zfill(self._file_padding) + '.dat'
+    def _get_filename_by_idx(self, idx: int, temp=False) -> str:
+        t = temp and '.tmp.' or ''
+        return f'{self.path}/{t}{self._file_prefix}' + f'{idx}'.zfill(self._file_padding) + '.dat'
 
     async def _setup_current_buffer(self):
         """
@@ -184,7 +204,8 @@ class AioDiskDB(AsyncRunnable):
         Put it into the temp storage for disk writing.
         Allocate a new buffer for the data queue.
         """
-        assert not self._tmp_idx_and_buffer.buffer
+        if self._tmp_idx_and_buffer.buffer:
+            raise exceptions.InvalidDBStateException('wrong state, cannot recover. buffer lost.')
         buffer = self._buffers.pop(0)
         v = self._buffer_index.pop(buffer.index)
         self._tmp_idx_and_buffer = TempBufferData(idx={buffer.index: v}, buffer=buffer)
@@ -272,13 +293,13 @@ class AioDiskDB(AsyncRunnable):
         Actually read data from files.
         """
         try:
-            with open(
-                self._get_filename_by_idx(location.index), 'rb'
-            ) as file:
+            filename = self._get_filename_by_idx(location.index)
+            with open(filename, 'rb') as file:
                 file.seek(location.position)
-                return file.read(location.size)
+                read = file.read(location.size)
+            return read or None
         except FileNotFoundError:
-            return b''
+            return None
 
     async def _pre_loop(self):
         if self._last_flush is None:
@@ -304,13 +325,15 @@ class AioDiskDB(AsyncRunnable):
         :param data: bytes
         :return: ItemLocation(int, int, int)
         """
+        if not data:
+            raise exceptions.EmptyPayloadException
         s = time.time()
         while self._buffers[-1].file_size >= self._max_file_size \
                 or self._buffers[-1].size >= self._max_buffer_size:
             # wait for the LRT to shift the buffers
             await asyncio.sleep(0.01)
-            if time.time() - s > self._write_timeout:
-                raise exceptions.WriteTimeoutException
+            if time.time() - s > self._timeout:
+                raise exceptions.TimeoutException
         return await self._add(data)
 
     @ensure_async_lock(LockType.WRITE)
@@ -399,7 +422,7 @@ class AioDiskDB(AsyncRunnable):
             )
         return dropped_index_size
 
-    @ensure_running(True)
+    @ensure_running(True, allow_stop_state=True)
     async def _write_db_snapshot(self, timestamp: int, *files_indexes: int):
         """
         Persist the current status of files before appending data.
@@ -413,26 +436,22 @@ class AioDiskDB(AsyncRunnable):
             except FileNotFoundError:
                 continue
             with open(file_name, 'rb') as f:
+                file_hash = self._hash_file(f)
                 f.seek(max(0, file_size - 8))
                 last_file_bytes = f.read(8)
             snapshot.append(
                 [
                     files_indexes[i].to_bytes(6, 'little'),
                     file_size.to_bytes(6, 'little'),
-                    last_file_bytes
+                    last_file_bytes,
+                    file_hash
                 ]
             )
-        sizes = map(
-            lambda x: [x, os.path.getsize(os.path.join(self.path, x))],
-            os.listdir(self.path)
-        )
         with open(os.path.join(self.path, f'.snapshot-{timestamp}'), 'wb') as f:
-            for s in sizes:
-                filename, size = s
-                data = filename.encode() + b';' + size.to_bytes(4, 'little') + b'\n'
-                f.write(data)
+            for s in snapshot:
+                f.write(b''.join(s))
 
-    @ensure_running(True)
+    @ensure_running(True, allow_stop_state=True)
     async def _clean_db_snapshot(self, timestamp: int):
         """
         The transaction is successfully committed.
@@ -445,7 +464,7 @@ class AioDiskDB(AsyncRunnable):
 
     def _apply_snapshot(self):
         """
-        Apply a database snapshot to recover a previous status.
+        Apply a database snapshot to recover a previous state.
         A snapshot is created before a transaction commit is made.
         Having a snapshot file during the AioDiskDB boot mean that a transaction commit is failed,
         and stale data may exists in the files.
@@ -463,7 +482,8 @@ class AioDiskDB(AsyncRunnable):
         if not snapshots:
             return
         snapshot_file = snapshots[0]
-        with open(os.path.join(str(self.path), snapshot_file), 'rb') as f:
+        snapshot_filename = os.path.join(str(self.path), snapshot_file)
+        with open(snapshot_filename, 'rb') as f:
             snapshot = f.read()
         assert snapshot
         pos = 0
@@ -473,25 +493,53 @@ class AioDiskDB(AsyncRunnable):
                 [
                     int.from_bytes(snapshot[pos:pos+6], 'little'),
                     int.from_bytes(snapshot[pos+6:pos+12], 'little'),
-                    snapshot[pos+12:pos+20]
+                    snapshot[pos+12:pos+20],
+                    snapshot[pos+20:pos+52]
                 ]
             )
-            pos += 20
+            pos += 52
         for file_data in files:
-            file_id = file_data[0]
-            snapshot_file_size = file_data[1]
-            snapshot_file_last_bytes = file_data[2]
-            with open(self._get_filename_by_idx(file_id), 'r+b') as f:
-                genesis_bytes = f.read(4)
-                if genesis_bytes != self._genesis_bytes:
-                    raise exceptions.InvalidDataFileException('Invalid genesis bytes for file')
+            self._recover_files_from_snapshot(file_data)
+        os.remove(snapshot_filename)
+
+    def _recover_files_from_snapshot(self, file_data: typing.List):
+        """
+        Actually apply snapshot rules to existing files.
+        """
+        file_id = file_data[0]
+        snapshot_file_size = file_data[1]
+        snapshot_file_last_bytes = file_data[2]
+        expected_hash = file_data[3]
+        origin_file_name = self._get_filename_by_idx(file_id)
+        bkp_file_name = self._get_filename_by_idx(file_id, temp=True)
+        shutil.copy(origin_file_name, bkp_file_name)
+        exc = None
+        with open(bkp_file_name, 'r+b') as f:
+            genesis_bytes = f.read(4)
+            if genesis_bytes != self._genesis_bytes:
+                exc = exceptions.InvalidDataFileException('Invalid genesis bytes for file')
+            else:
                 f.seek(snapshot_file_size - len(snapshot_file_last_bytes))
                 data = f.read(len(snapshot_file_last_bytes))
                 f.seek(0)
                 f.truncate(snapshot_file_size)
                 if data != snapshot_file_last_bytes:
-                    raise exceptions.InvalidDataFileException('File corrupted. Unrecoverable error')
-        os.remove(os.path.join(self.path, snapshot))
+                    exc = exceptions.InvalidDataFileException('File corrupted. Unrecoverable error')
+                final_hash = self._hash_file(f)
+                if final_hash != expected_hash:
+                    exc = exceptions.InvalidDataFileException('Invalid file hash recovered')
+        if not exc:
+            shutil.copy(bkp_file_name, origin_file_name)
+        os.remove(bkp_file_name)
+        if exc:
+            raise exc
+
+    def _drop_existing_temp_files(self):
+        for file in filter(
+            lambda x: x.startswith(f'.tmp.{self._file_prefix}') and x.endswith('.dat'),
+            os.listdir(self.path)
+        ):
+            os.remove(os.path.join(str(self.path), file))
 
     def _ensure_no_pending_snapshot(self):
         assert not self.running

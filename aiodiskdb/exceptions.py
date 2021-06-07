@@ -10,15 +10,11 @@ class NotRunningException(AioDiskDBException):
     pass
 
 
-class WriteTimeoutException(AioDiskDBException):
+class TimeoutException(AioDiskDBException):
     pass
 
 
 class ReadTimeoutException(AioDiskDBException):
-    pass
-
-
-class FailedToStopException(AioDiskDBException):
     pass
 
 
@@ -67,4 +63,8 @@ class InvalidDBStateException(AioDiskDBException):
 
 
 class IndexDoesNotExist(AioDiskDBException):
+    pass
+
+
+class EmptyPayloadException(AioDiskDBException):
     pass

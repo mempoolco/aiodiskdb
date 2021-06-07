@@ -163,17 +163,31 @@ Avg file size: 1.0kB
 
 ### Not-so-append-only
 
-**Aiodiskdb** is an append-only database. It means you'll never see *delete* or *remove* methods 
-around. However, indexes can be truncated, resulting a bulk delete of multiple locations.
+**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries. However, indexes can be truncated, resulting a bulk delete of multiple locations.
 
-With a combination of the `transaction` and `index_drop` methods, data pruning can be implemented.
+With a combination of the `transaction` and `index_drop` or `rpop` methods, data pruning can be implemented.
+
+
+### Limitations
+
+Simply put, from developer to developer,
+the following are the known limitations:
+
+```python
+assert len(data) <= max_buffer_size
+assert max_transaction_size < RAM
+```
+
+So, if, you have a max_buffer_size of 16 MB, you can't store a 20 MB file size in the DB.
+
 
 ---
 
 ### Credits
 
-Inspired by the raw block data storage of the [bitcoincore blocks database](https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_2):_Data_Storage).
+Inspired by the raw block data storage of the [bitcoincore blocks database](https://en.bitcoin.it/wiki/Bitcoin_Core_0.11_(ch_2):_Data_Storage). 
 
+Logo by mepheesto.
 
 ### Notes
 

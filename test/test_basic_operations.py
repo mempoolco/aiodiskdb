@@ -65,4 +65,5 @@ class TestReadWriteNonCached(AioDiskDBTestCase):
 
         item_location_3 = item_location_2
         item_location_3.index = 99
-        self.assertEqual(b'', await self.sut.read(item_location_3))
+        self.assertEqual(None, await self.sut.read(item_location_3))
+
