@@ -119,7 +119,7 @@ class AioDiskDB(AsyncRunnable):
 
     def _read_data_from_temp_buffer(self, location: ItemLocation):
         """
-        Data is placed into the temp buffer while writing it on disk,
+        Data is placed into the temp buffer while saving it on disk,
         so that writes are non blocking.
         """
         try:
@@ -232,7 +232,7 @@ class AioDiskDB(AsyncRunnable):
         - save_buffer_to_disk: blocking threaded task, non locked
         - clean_temp_buffer: coroutine, locked for writing
         """
-        timestamp = int(time.time())
+        timestamp = int(time.time()*1000)
         if lock:
             temp_buffer_data = await self._pop_buffer_data()
         else:

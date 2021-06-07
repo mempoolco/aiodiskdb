@@ -134,7 +134,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             raise exceptions.EmptyTransactionException
         await self.session._transaction_lock.acquire()
         await self._lock.acquire()
-        now = int(time.time())
+        now = int(time.time()*1000)
         try:
             await self._do_commit(now)
             locations = self._locations

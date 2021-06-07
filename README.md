@@ -19,6 +19,8 @@ To be used in the `asyncio` event loop.
 pip install aiodiskdb
 ```
 
+![aiodiskdb files](./docs/aiodiskdb.gif)
+
 ### Usage
 
 Start the DB by fire and forget:
