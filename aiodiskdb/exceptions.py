@@ -68,3 +68,7 @@ class IndexDoesNotExist(AioDiskDBException):
 
 class EmptyPayloadException(AioDiskDBException):
     pass
+
+
+class InvalidTrimCommandException(AioDiskDBException):
+    pass

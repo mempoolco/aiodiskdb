@@ -548,3 +548,28 @@ class AioDiskDB(AsyncRunnable):
             os.listdir(self.path)
         )):
             raise exceptions.InvalidDBStateException('Pending snapshot. DB must be cleaned.')
+
+    @ensure_async_lock(LockType.WRITE)
+    async def rtrim(self, index: int, trim_from: int, safety_check: bytes = b''):
+        """
+        Trim an index, from the right.
+
+        trim_from: the index location from which to delete data.
+        safety_check: optional, must match the first bytes of the trimmed slice.
+        """
+        await self._flush_buffer(lock=False)
+
+    @ensure_async_lock(LockType.WRITE)
+    async def ltrim(self, index: int, trim_to: int, safety_check: bytes = b''):
+        """
+        Trim and index, from the left.
+
+        trim_to: the index location of data that are going to be kept, anything before this point is trimmed out.
+        safety_check: optional, must match the last bytes of the trimmed slice.
+        """
+        if not location.size >= 1:
+            raise exceptions.InvalidTrimCommandException('location.size must be >= 1')
+        if location.position != -1:
+            raise exceptions.InvalidTrimCommandException('location.size must be -1')
+        await self._flush_buffer(lock=False)
+
