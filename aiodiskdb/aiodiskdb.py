@@ -119,6 +119,11 @@ class AioDiskDB(AsyncRunnable):
             file_size=self._file_header_size
         )
 
+    async def _refresh_current_buffer(self):
+        self._buffers = []
+        self._buffer_index.pop(self._buffers[-1].index)
+        await self._setup_current_buffer()
+
     def _pre_stop_signal(self) -> bool:
         """
         Handle graceful stop signals. Flush buffer to disk.
@@ -430,7 +435,7 @@ class AioDiskDB(AsyncRunnable):
     @ensure_async_lock(LockType.WRITE)
     async def drop_index(self, index: int) -> int:
         """
-        Destroy a single index.
+        Drop a single index.
         Ensures a flush first.
         If the deleted index is the current one, setup it again from scratch.
         """
@@ -438,16 +443,16 @@ class AioDiskDB(AsyncRunnable):
             raise exceptions.ReadOnlyDatabaseException
         if self._tmp_idx_and_buffer.buffer:
             await self._flush_buffer(lock=False)  # The whole method is locked.
+        return await self._drop_index_non_locked(index)
+
+    async def _drop_index_non_locked(self, index: int):
         filename = self._get_filename_by_idx(index)
         if not Path(filename).exists():
             raise exceptions.IndexDoesNotExist
         dropped_index_size = os.path.getsize(filename) - self._file_header_size
         os.remove(filename)
-
         if self._buffers[-1].index == index:
-            self._buffers = []
-            self._buffer_index.pop(index)
-            await self._setup_current_buffer()
+            await self._refresh_current_buffer()
 
         if self.events.on_index_drop:
             asyncio.get_event_loop().create_task(
@@ -582,24 +587,41 @@ class AioDiskDB(AsyncRunnable):
         )):
             raise exceptions.InvalidDBStateException('Pending snapshot. DB must be cleaned.')
 
+    @ensure_running(True)
     @ensure_async_lock(LockType.WRITE)
-    async def rtrim(self, index: int, trim_from: int, safety_check: bytes = b''):
+    async def rtrim(self, index: int, trim_from: int, safety_check: bytes = b'') -> int:
         """
         Trim an index, from the right.
 
         trim_from: the index location from which to delete data.
         safety_check: optional, must match the first bytes of the trimmed slice.
+
+        return the size of the trimmed slice.
         """
+        if not self._overwrite:
+            raise exceptions.ReadOnlyDatabaseException
+        try:
+            return await self._do_rtrim(index, trim_from, safety_check)
+        except FileNotFoundError:
+            raise exceptions.IndexDoesNotExist
+
+    async def _do_rtrim(self, index: int, trim_from: int, safety_check) -> int:
         if index <= 0:
-            raise exceptions.InvalidDataFileException(
-                'Index must be > 0'
-            )
-        if trim_from <= self._file_header_size:
-            raise exceptions.InvalidDataFileException(
-                'trim_from must exclude the file header, use drop_index instead'
-            )
-        await self._flush_buffer(lock=False)
+            raise exceptions.InvalidDataFileException('Index must be > 0')
+        if self._tmp_idx_and_buffer.buffer:
+            await self._flush_buffer(lock=False)  # The whole method is locked.
         filename = self._get_filename_by_idx(index)
+
+        if trim_from == self._file_header_size and not safety_check:
+            return await self._drop_index_non_locked(index)
+
+        elif trim_from == self._file_header_size:
+            with open(filename, 'r+b') as f:
+                if safety_check != f.read(len(safety_check)):
+                    raise exceptions.InvalidTrimCommandException('safety check failed')
+            return await self._drop_index_non_locked(index)
+
+        pre_trim_file_size = os.path.getsize(filename)
         with open(filename, 'r+b') as f:
             f.seek(trim_from)
             if safety_check:
@@ -607,7 +629,12 @@ class AioDiskDB(AsyncRunnable):
                     raise exceptions.InvalidTrimCommandException('safety check failed')
             f.seek(trim_from)
             f.truncate()
+        file_size = os.path.getsize(filename)
+        if self._buffers[-1].index == index:
+            await self._refresh_current_buffer()
+        return pre_trim_file_size - file_size
 
+    @ensure_running(True)
     @ensure_async_lock(LockType.WRITE)
     async def ltrim(self, index: int, trim_to: int, safety_check: bytes = b''):
         """
@@ -617,6 +644,9 @@ class AioDiskDB(AsyncRunnable):
         anything before this point is trimmed out.
         safety_check: optional, must match the last bytes of the trimmed slice.
         """
+        if not self._overwrite:
+            raise exceptions.ReadOnlyDatabaseException
+
         if index <= 0:
             raise exceptions.InvalidDataFileException(
                 'Index must be > 0'
@@ -625,4 +655,5 @@ class AioDiskDB(AsyncRunnable):
             raise exceptions.InvalidDataFileException(
                 'trim_from must exclude the file header'
             )
-        await self._flush_buffer(lock=False)
+        if self._tmp_idx_and_buffer.buffer:
+            await self._flush_buffer(lock=False)  # The whole method is locked.
