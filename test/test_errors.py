@@ -12,7 +12,7 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
 
     async def test(self):
         await self._run()
-        b = os.urandom(1024 ** 2 + 1)
+        b = os.urandom(1024 ** 2 + 10)
         with self.assertRaises(exceptions.WriteFailedException):
             await self.sut.add(b)
         await self._stop()

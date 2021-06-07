@@ -27,7 +27,7 @@ class AioDBTestExitSignals(AioDiskDBTestCase):
             self.sut.on_stop_signal()
         self.sut.on_stop_signal()  # fire it twice, it must be executed once
         self.assertEqual(
-            self.sut.GENESIS_BYTES_LENGTH + 4,
+            self.sut._file_header_size + 4,
             os.path.getsize(self._path + '/data00000.dat')
         )
         self._setup_sut()

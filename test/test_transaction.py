@@ -17,7 +17,7 @@ class TestAioDiskDBTransaction(AioDiskDBTestCase):
         await transaction.commit()
         with open(self._path + '/data00000.dat', 'rb') as f:
             x = f.read()
-        self.assertEqual(x, self.sut._genesis_bytes + b'data1data2data3')
+        self.assertEqual(x, self.sut._get_new_file_header() + b'data1data2data3')
         location1.size += 10  # increase the location size to read contiguous data
         self.assertEqual(
             b'data1data2data3',
