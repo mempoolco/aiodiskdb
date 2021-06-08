@@ -27,12 +27,24 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
         super().tearDown()
 
 
-class AioDBTestErrorWrongGenesis(AioDiskDBTestCase):
+class AioDBTestErrorWrongHeaderShort(AioDiskDBTestCase):
     def setUp(self, *a, **kw):
         super().setUp()
         Path(self._path).mkdir(parents=True, exist_ok=True)
         with open(self._path + '/data00000.dat', 'wb') as f:
             f.write(b'aa'*8)
+
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidDataFileException):
+            await self.sut.run()
+
+
+class AioDBTestErrorWrongHeader(AioDiskDBTestCase):
+    def setUp(self, *a, **kw):
+        super().setUp()
+        Path(self._path).mkdir(parents=True, exist_ok=True)
+        with open(self._path + '/data00000.dat', 'wb') as f:
+            f.write(b'aa'*16)
 
     async def test(self):
         with self.assertRaises(exceptions.InvalidDataFileException):

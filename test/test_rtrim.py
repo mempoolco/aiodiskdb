@@ -29,9 +29,9 @@ class TestRTRIM(AioDiskDBTestCase):
         self.assertEqual(b'test_2', read1)
         read2 = await self.sut.read(item_location_2)
         self.assertEqual(b'test_2', read2)
-        slice_size = await self.sut.rtrim(0, 9, safety_check=b'_2')
+        slice_size = await self.sut.rtrim(0, 9, safety_check=b't_2')
         slice_size_2 = await self.sut.rtrim(0, 6)
-        self.assertEqual(slice_size+slice_size_2, len(read2))
+        self.assertEqual(slice_size + slice_size_2, len(read2))
         self.assertIsNone(await self.sut.read(item_location_2))
         item_location_2 = await self.sut.add(b'test_3')
         self.assertEqual(

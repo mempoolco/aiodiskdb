@@ -236,7 +236,9 @@ class AioDiskDB(AsyncRunnable):
         else:
             curr_idx = int(last_file.replace(self._file_prefix, '').replace('.dat', ''))
             filename = self._get_filename_by_idx(curr_idx)
-            curr_size = os.path.getsize(filename)
+            curr_size = os.path.getsize(filename) - self._file_header_size
+            if curr_size < 0:
+                raise exceptions.InvalidDataFileException('Invalid file size')
             with open(filename, 'rb') as f:
                 header = self._read_file_header(f)
                 offset = header.trim_offset
@@ -356,7 +358,7 @@ class AioDiskDB(AsyncRunnable):
                     flush_time,
                     WriteEvent(
                         index=temp_buffer_data.buffer.index,
-                        position=temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
+                        position=temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size + offset,
                         size=temp_buffer_data.buffer.size
                     )
                 )
