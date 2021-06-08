@@ -109,9 +109,10 @@ class AioDiskDB(AsyncRunnable):
         """
         Bake a fresh file header for a new database file.
         """
-        return self._genesis_bytes + \
-               int(0).to_bytes(self.HEADER_TRIM_OFFSET, 'little') + \
-               int(0).to_bytes(self.RESERVED_HEADER_LENGTH, 'little')
+        return FileHeader(
+            genesis_bytes=self._genesis_bytes,
+            trim_offset=0,
+        ).serialize()
 
     def _read_file_header(self, f: typing.IO):
         """
@@ -244,8 +245,9 @@ class AioDiskDB(AsyncRunnable):
         self._buffers.append(buffer)
         self._buffer_index[curr_idx] = OrderedDict()
 
+    @ensure_async_lock(LockType.TRANSACTION)
     async def _teardown(self):
-        self._buffers[-1].size and await self._flush_buffer()
+        self._buffers[-1].size and await self._flush_buffer_no_transaction_lock()
         self._executor.shutdown(wait=True)
 
     def enable_overwrite(self):
@@ -651,7 +653,7 @@ class AioDiskDB(AsyncRunnable):
         except FileNotFoundError:
             raise exceptions.IndexDoesNotExist
 
-    async def _do_rtrim(self, index: int, trim_from: int, safety_check) -> int:
+    async def _do_rtrim(self, index: int, trim_from: int, safety_check: bytes) -> int:
         if index < 0:
             raise exceptions.IndexDoesNotExist('Index must be > 0')
         filename = self._get_filename_by_idx(index)
@@ -682,7 +684,7 @@ class AioDiskDB(AsyncRunnable):
     @ensure_async_lock(LockType.TRANSACTION)
     async def ltrim(self, index: int, trim_to: int, safety_check: bytes = b''):
         """
-        Trim and index, from the left.
+        Trim an index, from the left.
 
         trim_to: the index location of data that are going to be kept,
         anything before this point is trimmed out.
@@ -695,9 +697,48 @@ class AioDiskDB(AsyncRunnable):
             raise exceptions.InvalidDataFileException(
                 'Index must be > 0'
             )
-        if trim_to <= self._file_header_size:
-            raise exceptions.InvalidDataFileException(
-                'trim_from must exclude the file header'
-            )
-        if self._tmp_idx_and_buffer.buffer:
-            await self._flush_buffer(lock=False)  # The whole method is locked.
+        assert not self._tmp_idx_and_buffer.buffer, self._tmp_idx_and_buffer.buffer
+        temp_filename = self._get_filename_by_idx(index, temp=True)
+        try:
+            os.path.getsize(temp_filename)
+            exc = exceptions.InvalidDBStateException('trim file already exists')
+            self._error = exc
+            self._stop = True
+        except FileNotFoundError:
+            pass
+        try:
+            await self._flush_buffer_no_transaction_lock()
+            return await self._do_ltrim(index, trim_to, safety_check)
+        except FileNotFoundError:
+            raise exceptions.IndexDoesNotExist
+
+    async def _do_ltrim(self, index: int, trim_to: int, safety_check: bytes) -> int:
+        filename = self._get_filename_by_idx(index)
+        with open(filename, 'rb') as origin:
+            header = self._read_file_header(origin)
+        index_size = os.path.getsize(filename) - self._file_header_size + header.trim_offset
+        if index_size < trim_to:
+            raise exceptions.InvalidTrimCommandException('trim_to must be <= index_size')
+        elif index_size == trim_to:
+            return await self._drop_index_non_locked(index)
+
+        with open(filename, 'rb') as origin:
+            safety_check_length = len(safety_check)
+            seek_at = self._file_header_size + trim_to - header.trim_offset
+            if safety_check_length:
+                origin.seek(seek_at - safety_check_length)
+                check = origin.read(safety_check_length)
+                if check != safety_check_length:
+                    raise exceptions.InvalidTrimCommandException('safety check failed')
+            origin.seek(seek_at)
+            temp_filename = self._get_filename_by_idx(index, temp=True)
+            with open(temp_filename, 'wb') as target:
+                header.trim_offset += trim_to
+                target.write(header.serialize())
+                data = origin.read(1024**2)
+                while data:
+                    target.write(data)
+                    data = origin.read(1024 ** 2)
+        shutil.move(temp_filename, filename)
+        return 0
+

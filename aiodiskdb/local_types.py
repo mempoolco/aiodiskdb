@@ -85,3 +85,8 @@ class WriteEvent:
 class FileHeader:
     genesis_bytes: bytes
     trim_offset: int
+
+    def serialize(self) -> bytes:
+        return self.genesis_bytes + \
+               int(self.trim_offset).to_bytes(4, 'little') + \
+               int(0).to_bytes(16, 'little')  # reserved

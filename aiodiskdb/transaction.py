@@ -100,14 +100,13 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         Commit a transaction, save to data the <_stack> content, using TempBufferData objects.
         """
         await self._lock.acquire()
-        if self._status == TransactionStatus.DONE:
-            raise exceptions.TransactionAlreadyCommittedException
-        elif self._status == TransactionStatus.ONGOING:
-            raise exceptions.TransactionCommitOnGoingException
-        elif not self._stack:
-            raise exceptions.EmptyTransactionException
-        now = int(time.time()*1000)
         try:
+            if self._status == TransactionStatus.DONE:
+                raise exceptions.TransactionAlreadyCommittedException
+            elif not self._stack:
+                raise exceptions.EmptyTransactionException
+            now = int(time.time()*1000)
+
             await self.session._flush_buffer()
             await self._do_commit(now)
             locations = self._locations

@@ -112,12 +112,11 @@ db.disable_overwrite()
 ```
 
 These three methods respectively:
-- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`)
+- prune data from the right, at index `0`, starting from the location `400` to the index end (`rtrim`)
 - prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
 - drop the whole index `3`, resulting in a file deletion: `drop_index`
 
 All the items locations not involved into a TRIM operation remains unmodified, even after an `ltrim`.
-
 
 ### Highly customizable
 
@@ -190,8 +189,16 @@ Avg file size: 1.0kB
 ```python
 assert len(data) <= max_buffer_size
 assert max_transaction_size < RAM
-assert max_file_size < 2**32
+assert max_file_size < 4096
 ```
+
+If `rtrim` is applied on the **current** index, the space is reused, otherwise no. 
+With `ltrim`, once the space is freed, it is not allocated again. 
+With `drop_index` the whole index is discarded not reused.
+
+With a lot of data turn-over (pruning by trimming), it may be necessary to set an unusual `file_padding`, and
+increase the database potential size. 
+
 ---
 
 ### Credits

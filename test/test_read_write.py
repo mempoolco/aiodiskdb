@@ -22,7 +22,6 @@ class TestReadWriteCached(AioDiskDBTestCase):
         self.assertEqual(b'test_2', read2)
         self.assertEqual(self._writes, [])
 
-
     def tearDown(self):
         self.assertEqual(1, len(self._stops))
         self.assertIsInstance(self._stops[0][0], float)

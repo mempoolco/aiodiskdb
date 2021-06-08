@@ -3,6 +3,7 @@ import os
 import random
 import time
 
+from aiodiskdb import exceptions
 from test import AioDiskDBTestCase, run_test_db, AioDiskDBConcurrencyTest
 
 
@@ -97,3 +98,31 @@ class TestAioDiskDBConcurrentTransactions(AioDiskDBConcurrencyTest):
             self.assertTrue(self._ongoing_reads, msg='reads failed')
         self._stop_reads = True
         print(f'Read only test from disk over. Reads: {self._reads_count - current_reads}')
+
+
+class TransactionErrors(AioDiskDBTestCase):
+    def setUp(self, *a):
+        super().setUp(*a, max_file_size=2, max_buffer_size=1)
+
+    @run_test_db
+    async def test(self):
+        transaction = await self.sut.transaction()
+        with self.assertRaises(exceptions.WriteFailedException):
+            transaction.add(os.urandom(3*1024**2))
+        with self.assertRaises(exceptions.EmptyTransactionException):
+            await transaction.commit()
+        transaction.add(b'test')
+        await transaction.commit()
+        with self.assertRaises(exceptions.TransactionAlreadyCommittedException):
+            await transaction.commit()
+        with self.assertRaises(exceptions.TransactionAlreadyCommittedException):
+            await transaction.add(b'bbb')
+        transaction = await self.sut.transaction()
+        for x in range(0, 100):
+            transaction.add(os.urandom(1024**2))
+        self.assertTrue(self.sut.running)
+        self.loop.create_task(transaction.commit())
+        await asyncio.sleep(0.01)
+        self.assertTrue(self.sut.running)
+        with self.assertRaises(exceptions.TransactionCommitOnGoingException):
+            transaction.add(b'aaaa')
