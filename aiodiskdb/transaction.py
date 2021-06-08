@@ -2,18 +2,18 @@ import asyncio
 import time
 
 import typing
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from aiodiskdb import AioDiskDB, exceptions
 from aiodiskdb.abstracts import AioDiskDBTransactionAbstract
 from aiodiskdb.internals import ensure_async_lock
-from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, WriteEvent, LockType
+from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, LockType
 
 
 class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
     def __init__(self, session: AioDiskDB):
         self.session = session
-        self._stack = list()
+        self._stack = deque()
         self._status = TransactionStatus.INITIALIZED
         self._lock = asyncio.Lock()
         self._locations = list()
@@ -51,13 +51,14 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             )
         ]
         max_file_size = self.session._max_file_size
-        while self._stack:
-            data_size = len(self._stack[0])
+        while len(self._stack):
+            data = self._stack.popleft()
+            data_size = len(data)
             buffer: Buffer = res[-1].buffer
             if data_size + buffer.file_size > max_file_size:
                 self._bake_new_temp_buffer_data(res)
+                self._stack.insert(0, data)
                 continue
-            data = self._stack.pop(0)
             self._locations.append(
                 ItemLocation(buffer.index, buffer.file_size, data_size)
             )
@@ -110,7 +111,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             await self.session._flush_buffer()
             await self._do_commit(now)
             locations = self._locations
-            self._locations = []
+            self._locations = list()
             return locations
         finally:
             self._lock.release()
