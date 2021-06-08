@@ -96,6 +96,29 @@ transaction.add(b'deadbeef')
 locations: typing.Sequence[ItemLocation] = await transaction.commit()
 ```
 
+
+### Not-so-append-only
+
+**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries.
+
+However, data pruning is supported, with the following methods:
+
+```python
+db.enable_overwrite()
+db.rtrim(0, 400)
+db.ltrim(8, 900)
+db.drop_index(3)
+db.disable_overwrite()
+```
+
+These three methods respectively:
+- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`)
+- prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
+- drop the whole index `3`, resulting in a file deletion: `drop_index`
+
+All the items locations not involved into a TRIM operation remains unmodified, even after an `ltrim`.
+
+
 ### Highly customizable
 
 The default parameters: 
@@ -162,34 +185,12 @@ Bandwidth: 20MB (1.05MB/s),
 Avg file size: 1.0kB
 ```
 
-### Not-so-append-only
-
-**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries.
-
-However, data pruning is supported, with the following methods:
-
-```python
-db.enable_overwrite()
-db.rtrim(0, 400)
-db.ltrim(8, 900)
-db.drop_index(3)
-db.disable_overwrite()
-```
-
-These three methods respectively:
-- prune data from the right, at index `0`, starting from the location `400` to the end of the inde (`rtrim`)
-- prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
-- drop the whole index `3`, resulting in a file deletion: `drop_index`
-
-All the items locations not involved into a TRIM operation remains unmodified, even after an `ltrim`.
-
-
-
 ### Limitations
 
 ```python
 assert len(data) <= max_buffer_size
 assert max_transaction_size < RAM
+assert max_file_size < 2**32
 ```
 ---
 

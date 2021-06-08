@@ -61,3 +61,11 @@ class TestCheckpoints(AioDiskDBTestCase):
             for x in range(0, 20):
                 await self.sut.add(os.urandom(1024 ** 2))
         self.assertFalse(self.sut.running)
+
+
+class TestCleanStaleData(AioDiskDBTestCase):
+    def test(self):
+        with open(self._path + '/.tmp.data00000.dat', 'wb') as f:
+            f.write(os.urandom(5))
+
+        self._setup_sut()

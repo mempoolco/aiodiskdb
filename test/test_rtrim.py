@@ -63,3 +63,9 @@ class TestTrimWholeFile(AioDiskDBTestCase):
         await self.sut.rtrim(0, 0)
         with self.assertRaises(FileNotFoundError):
             os.path.getsize(self._path + '/data00000.dat')
+        for _ in range(0, 20):
+            await self.sut.add(os.urandom(1024**2))
+        with self.assertRaises(exceptions.InvalidTrimCommandException):
+            await self.sut.rtrim(0, 0, safety_check=b'wrong_bytes')
+        with self.assertRaises(exceptions.InvalidTrimCommandException):
+            await self.sut.rtrim(0, 1, safety_check=b'wrong_bytes')

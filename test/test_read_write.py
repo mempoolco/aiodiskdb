@@ -22,6 +22,7 @@ class TestReadWriteCached(AioDiskDBTestCase):
         self.assertEqual(b'test_2', read2)
         self.assertEqual(self._writes, [])
 
+
     def tearDown(self):
         self.assertEqual(1, len(self._stops))
         self.assertIsInstance(self._stops[0][0], float)
@@ -67,3 +68,14 @@ class TestReadWriteNonCached(AioDiskDBTestCase):
         item_location_3.index = 99
         self.assertEqual(None, await self.sut.read(item_location_3))
 
+
+class TestFlushInterval(AioDiskDBTestCase):
+    def setUp(self, *a):
+        super().setUp(*a, flush_interval=3)
+
+    @run_test_db
+    async def test(self):
+        await self.sut.add(b'test_2')
+        self.assertEqual(6, self.sut._buffers[-1].size)
+        await asyncio.sleep(self.sut._flush_interval + 1)
+        self.assertEqual(0, self.sut._buffers[-1].size)

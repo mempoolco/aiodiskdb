@@ -22,32 +22,6 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
     def _transaction_lock(self):
         return self.session._transaction_lock
 
-    async def _ensure_flush(self):
-        """
-        This method must use non-locked session methods
-        cause it's already into a transaction lock.
-        """
-        temp_buffer_data = await self.session._pop_buffer_data_non_locked()
-        await asyncio.get_event_loop().run_in_executor(
-            None,
-            self.session._save_buffer_to_disk,
-            temp_buffer_data
-        )
-        flush_time = time.time()
-        if temp_buffer_data.buffer.data:
-            asyncio.get_event_loop().create_task(
-                self.session.events.on_write(
-                    flush_time,
-                    WriteEvent(
-                        index=temp_buffer_data.buffer.index,
-                        position=temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size,
-                        size=temp_buffer_data.buffer.size
-                    )
-                )
-            )
-        await self.session._clean_temp_buffer_non_locked()
-        self._last_flush = flush_time
-
     def _bake_new_temp_buffer_data(self, res: typing.List[TempBufferData]) -> None:
         """
         The current buffer must be full if this method is called.

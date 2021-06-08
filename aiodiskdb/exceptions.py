@@ -54,10 +54,6 @@ class TransactionAlreadyCommittedException(AioDiskDBException):
     pass
 
 
-class PendingCheckpointException(AioDiskDBException):
-    pass
-
-
 class InvalidDBStateException(AioDiskDBException):
     pass
 

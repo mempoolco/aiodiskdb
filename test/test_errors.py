@@ -1,4 +1,3 @@
-import asyncio
 import os
 import time
 from pathlib import Path
@@ -13,6 +12,8 @@ class AioDBTestErrorWrongFiles(AioDiskDBTestCase):
 
     async def test(self):
         await self._run()
+        with self.assertRaises(exceptions.EmptyPayloadException):
+            await self.sut.add(b'')
         b = os.urandom(1024 ** 2 + 10)
         with self.assertRaises(exceptions.WriteFailedException):
             await self.sut.add(b)
@@ -144,7 +145,6 @@ class AioDBTestStopTimeoutError(AioDiskDBTestCase):
         pass
 
 
-
 class AioDBTestFileSizeChangedError(AioDiskDBTestCase):
     def setUp(self, *a, **kw):
         super().setUp(max_file_size=10, max_buffer_size=2, timeout=1)
@@ -192,5 +192,3 @@ class AioDBTestMissingFileException(AioDiskDBTestCase):
 
     def tearDown(self) -> None:
         pass
-
-

@@ -219,9 +219,6 @@ class AioDiskDB(AsyncRunnable):
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
         """
         files = sorted(os.listdir(self.path))
-        if any(filter(lambda _f: _f.startswith('.checkpoint'), files)):
-            raise exceptions.PendingCheckpointException
-
         last_file = files and list(
             filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files)
         )[-1]
@@ -264,8 +261,7 @@ class AioDiskDB(AsyncRunnable):
         Put it into the temp storage for disk writing.
         Allocate a new buffer for the data queue.
         """
-        if self._tmp_idx_and_buffer.buffer:
-            raise exceptions.InvalidDBStateException('wrong state, cannot recover. buffer lost.')
+        assert not self._tmp_idx_and_buffer.buffer, 'wrong state, cannot recover. buffer lost.'
         buffer = self._buffers.pop(0)
         v = self._buffer_index.pop(buffer.index)
         self._tmp_idx_and_buffer = TempBufferData(idx={buffer.index: v}, buffer=buffer)
@@ -542,12 +538,16 @@ class AioDiskDB(AsyncRunnable):
             ) from e
 
     def _get_checkpoints(self) -> typing.List[str]:
-        return list(
+        checkpoints = list(
             filter(
                 lambda x: x.startswith('.checkpoint-'),
                 os.listdir(self.path)
             )
         )
+        if len(checkpoints) > 1:
+            # This should NEVER happen.
+            raise exceptions.InvalidDBStateException('Multiple checkpoints, unrecoverable error.')
+        return checkpoints
 
     def _apply_checkpoint(self):
         """
@@ -561,9 +561,6 @@ class AioDiskDB(AsyncRunnable):
         """
         assert not self.running
         checkpoints = self._get_checkpoints()
-        if len(checkpoints) > 1:
-            # This should NEVER happen.
-            raise exceptions.InvalidDBStateException('Multiple checkpoints, unrecoverable error.')
         if not checkpoints:
             return
         checkpoint_file = checkpoints[0]
