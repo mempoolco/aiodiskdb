@@ -47,7 +47,7 @@ class TestCheckpoints(AioDiskDBTestCase):
         self.assertEqual(x, self.sut._bake_new_file_header() + data)
 
         self._setup_sut()
-        await self._run(expect_failure='Requested a checkpoint, but a checkpoint already exist')
+        await self._run(expect_failure='Multiple checkpoint')
         await self.sut._write_db_checkpoint(checkpoint_id, 0)
         with self.assertRaises(exceptions.InvalidDBStateException):
             await self.sut._write_db_checkpoint(checkpoint_id, 0)

@@ -83,13 +83,13 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
         )
         self._hook_events()
 
-    async def _run(self, expect_failure=False):
+    async def _run(self, expect_failure=''):
         async def _handle_run():
             try:
                 await self.sut.run()
             except Exception as e:
-                if not expect_failure or expect_failure not in str(e):
-                    raise
+                if expect_failure:
+                    self.assertTrue(expect_failure in str(e))
 
         self.loop.create_task(_handle_run(), name='aiodiskdb_main_loop')
         s = time.time()

@@ -11,6 +11,19 @@ class ItemLocation:
     position: int
     size: int
 
+    def deserialize(self):
+        return self.index.to_bytes(4, 'little') + \
+            self.position.to_bytes(4, 'little') + \
+            self.size.to_bytes(4, 'little')
+
+    @classmethod
+    def serialize(cls, location: bytes):
+        return cls(
+            index=int.from_bytes(location[:4], 'little'),
+            position=int.from_bytes(location[4:8], 'little'),
+            size=int.from_bytes(location[8:12], 'little'),
+        )
+
 
 class LockType(Enum):
     READ = 0
