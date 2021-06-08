@@ -80,9 +80,9 @@ class AioDiskDB(AsyncRunnable):
                              self.RESERVED_HEADER_LENGTH
         if clean_stale_data:
             self._drop_existing_temp_files()
-            self._apply_snapshot()
+            self._apply_checkpoint()
         else:
-            self._ensure_no_pending_snapshot()
+            self._ensure_no_pending_checkpoint()
         _max_accepted_file_size = 2**32 - 1 - self._file_header_size
         if max_file_size > _max_accepted_file_size:
             raise exceptions.InvalidConfigurationException(f'max file size is {_max_accepted_file_size}b')
@@ -219,8 +219,8 @@ class AioDiskDB(AsyncRunnable):
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
         """
         files = sorted(os.listdir(self.path))
-        if any(filter(lambda _f: _f.startswith('.snapshot'), files)):
-            raise exceptions.PendingSnapshotException
+        if any(filter(lambda _f: _f.startswith('.checkpoint'), files)):
+            raise exceptions.PendingCheckpointException
 
         last_file = files and list(
             filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files)
@@ -336,7 +336,7 @@ class AioDiskDB(AsyncRunnable):
     async def _flush_buffer_no_transaction_lock(self):
         timestamp = int(time.time()*1000)
         temp_buffer_data = await self._pop_buffer_data()
-        await self._write_db_snapshot(timestamp, temp_buffer_data.buffer.index)
+        await self._write_db_checkpoint(timestamp, temp_buffer_data.buffer.index)
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
             self._save_buffer_to_disk,
@@ -358,7 +358,7 @@ class AioDiskDB(AsyncRunnable):
 
         await self._clean_temp_buffer()
         self._last_flush = flush_time
-        await self._clean_db_snapshot(timestamp)
+        await self._clean_db_checkpoint(timestamp)
 
     def _process_location_read(self, location: ItemLocation):
         """
@@ -495,18 +495,18 @@ class AioDiskDB(AsyncRunnable):
         return dropped_index_size
 
     @ensure_running(True, allow_stop_state=True)
-    async def _write_db_snapshot(self, timestamp: int, *files_indexes: int):
+    async def _write_db_checkpoint(self, timestamp: int, *files_indexes: int):
         """
         Persist the current status of files before appending data.
         It will be reverted in case of a commit failure.
         """
-        snapshots = self._get_snapshots()
-        if snapshots:
-            raise exceptions.InvalidDBStateException('Requested a snapshot, but a snapshot already exist')
+        checkpoints = self._get_checkpoints()
+        if checkpoints:
+            raise exceptions.InvalidDBStateException('Requested a checkpoint, but a checkpoint already exist')
 
         filenames = map(self._get_filename_by_idx, files_indexes)
 
-        snapshot = []
+        checkpoint = []
         for i, file_name in enumerate(filenames):
             try:
                 file_size = os.path.getsize(file_name)
@@ -516,7 +516,7 @@ class AioDiskDB(AsyncRunnable):
                 file_hash = self._hash_file(f)
                 f.seek(max(0, file_size - 8))
                 last_file_bytes = f.read(8)
-            snapshot.append(
+            checkpoint.append(
                 [
                     files_indexes[i].to_bytes(6, 'little'),
                     file_size.to_bytes(6, 'little'),
@@ -524,76 +524,76 @@ class AioDiskDB(AsyncRunnable):
                     file_hash
                 ]
             )
-        with open(os.path.join(self.path, f'.snapshot-{timestamp}'), 'wb') as f:
-            for s in snapshot:
+        with open(os.path.join(self.path, f'.checkpoint-{timestamp}'), 'wb') as f:
+            for s in checkpoint:
                 f.write(b''.join(s))
 
     @ensure_running(True, allow_stop_state=True)
-    async def _clean_db_snapshot(self, timestamp: int):
+    async def _clean_db_checkpoint(self, timestamp: int):
         """
         The transaction is successfully committed.
-        The snapshot file must be deleted.
+        The checkpoint file must be deleted.
         """
         try:
-            os.remove(os.path.join(self.path, f'.snapshot-{timestamp}'))
+            os.remove(os.path.join(self.path, f'.checkpoint-{timestamp}'))
         except FileNotFoundError as e:
             raise exceptions.InvalidDBStateException(
-                'Requested to delete a snapshot that does not exist'
+                'Requested to delete a checkpoint that does not exist'
             ) from e
 
-    def _get_snapshots(self) -> typing.List[str]:
+    def _get_checkpoints(self) -> typing.List[str]:
         return list(
             filter(
-                lambda x: x.startswith('.snapshot-'),
+                lambda x: x.startswith('.checkpoint-'),
                 os.listdir(self.path)
             )
         )
 
-    def _apply_snapshot(self):
+    def _apply_checkpoint(self):
         """
-        Apply a database snapshot to recover a previous state.
-        A snapshot is created before a transaction commit is made.
-        A snapshot is created before a transaction commit is made.
-        Having a snapshot file during the AioDiskDB boot mean that a transaction commit is failed,
+        Apply a database checkpoint to recover a previous state.
+        A checkpoint is created before a transaction commit is made.
+        A checkpoint is created before a transaction commit is made.
+        Having a checkpoint file during the AioDiskDB boot mean that a transaction commit is failed,
         and stale data may exists in the files.
-        Applying the snapshot discard all the data added to the files after taking it.
+        Applying the checkpoint discard all the data added to the files after taking it.
         Stale data is deleted.
         """
         assert not self.running
-        snapshots = self._get_snapshots()
-        if len(snapshots) > 1:
+        checkpoints = self._get_checkpoints()
+        if len(checkpoints) > 1:
             # This should NEVER happen.
-            raise exceptions.InvalidDBStateException('Multiple snapshots, unrecoverable error.')
-        if not snapshots:
+            raise exceptions.InvalidDBStateException('Multiple checkpoints, unrecoverable error.')
+        if not checkpoints:
             return
-        snapshot_file = snapshots[0]
-        snapshot_filename = os.path.join(str(self.path), snapshot_file)
-        with open(snapshot_filename, 'rb') as f:
-            snapshot = f.read()
-        assert snapshot
+        checkpoint_file = checkpoints[0]
+        checkpoint_filename = os.path.join(str(self.path), checkpoint_file)
+        with open(checkpoint_filename, 'rb') as f:
+            checkpoint = f.read()
+        assert checkpoint
         pos = 0
         files = []
-        while pos < len(snapshot):
+        while pos < len(checkpoint):
             files.append(
                 [
-                    int.from_bytes(snapshot[pos:pos+6], 'little'),
-                    int.from_bytes(snapshot[pos+6:pos+12], 'little'),
-                    snapshot[pos+12:pos+20],
-                    snapshot[pos+20:pos+52]
+                    int.from_bytes(checkpoint[pos:pos+6], 'little'),
+                    int.from_bytes(checkpoint[pos+6:pos+12], 'little'),
+                    checkpoint[pos+12:pos+20],
+                    checkpoint[pos+20:pos+52]
                 ]
             )
             pos += 52
         for file_data in files:
-            self._recover_files_from_snapshot(file_data)
-        os.remove(snapshot_filename)
+            self._recover_files_from_checkpoint(file_data)
+        os.remove(checkpoint_filename)
 
-    def _recover_files_from_snapshot(self, file_data: typing.List):
+    def _recover_files_from_checkpoint(self, file_data: typing.List):
         """
-        Actually apply snapshot rules to existing files.
+        Actually apply checkpoint rules to existing files.
         """
         file_id = file_data[0]
-        snapshot_file_size = file_data[1]
-        snapshot_file_last_bytes = file_data[2]
+        checkpoint_file_size = file_data[1]
+        checkpoint_file_last_bytes = file_data[2]
         expected_hash = file_data[3]
         origin_file_name = self._get_filename_by_idx(file_id)
         bkp_file_name = self._get_filename_by_idx(file_id, temp=True)
@@ -604,11 +604,11 @@ class AioDiskDB(AsyncRunnable):
             if not self._is_file_header(header):
                 exc = exceptions.InvalidDataFileException('Invalid file header')
             else:
-                f.seek(snapshot_file_size - len(snapshot_file_last_bytes))
-                data = f.read(len(snapshot_file_last_bytes))
+                f.seek(checkpoint_file_size - len(checkpoint_file_last_bytes))
+                data = f.read(len(checkpoint_file_last_bytes))
                 f.seek(0)
-                f.truncate(snapshot_file_size)
-                if data != snapshot_file_last_bytes:
+                f.truncate(checkpoint_file_size)
+                if data != checkpoint_file_last_bytes:
                     exc = exceptions.InvalidDataFileException('File corrupted. Unrecoverable error')
                 final_hash = self._hash_file(f)
                 if final_hash != expected_hash:
@@ -626,13 +626,13 @@ class AioDiskDB(AsyncRunnable):
         ):
             os.remove(os.path.join(str(self.path), file))
 
-    def _ensure_no_pending_snapshot(self):
+    def _ensure_no_pending_checkpoint(self):
         assert not self.running
         if any(map(
-            lambda x: x.startswith('.snapshot-'),
+            lambda x: x.startswith('.checkpoint-'),
             os.listdir(self.path)
         )):
-            raise exceptions.InvalidDBStateException('Pending snapshot. DB must be cleaned.')
+            raise exceptions.InvalidDBStateException('Pending checkpoint. DB must be cleaned.')
 
     @ensure_running(True)
     @ensure_async_lock(LockType.TRANSACTION)

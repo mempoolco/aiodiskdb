@@ -54,7 +54,7 @@ class TransactionAlreadyCommittedException(AioDiskDBException):
     pass
 
 
-class PendingSnapshotException(AioDiskDBException):
+class PendingCheckpointException(AioDiskDBException):
     pass
 
 

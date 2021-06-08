@@ -1,4 +1,3 @@
-import asyncio
 import os
 import shutil
 
@@ -6,7 +5,7 @@ from aiodiskdb import exceptions
 from test import AioDiskDBTestCase
 
 
-class TestSnapshots(AioDiskDBTestCase):
+class TestCheckpoints(AioDiskDBTestCase):
     def setUp(
             self, *a,
             max_file_size=16,
@@ -18,26 +17,26 @@ class TestSnapshots(AioDiskDBTestCase):
         await self._run()
 
         with self.assertRaises(exceptions.InvalidDBStateException):
-            await self.sut._clean_db_snapshot(333)
+            await self.sut._clean_db_checkpoint(333)
 
-        snapshot_id = 333
+        checkpoint_id = 333
         data = os.urandom(1024**2)
         data2 = b'daf'
         item_location = await self.sut.add(data)
         await self.sut._flush_buffer()
-        await self.sut._write_db_snapshot(snapshot_id, 0)
-        shutil.move(self._path + '/.snapshot-333', self._path + '/_snapshot')
+        await self.sut._write_db_checkpoint(checkpoint_id, 0)
+        shutil.move(self._path + '/.checkpoint-333', self._path + '/_checkpoint')
         second_location_add = await self.sut.add(data2)
         assert await self.sut.read(second_location_add) == data2
         await self._stop()
-        shutil.move(self._path + '/_snapshot', self._path + '/.snapshot-333')
+        shutil.move(self._path + '/_checkpoint', self._path + '/.checkpoint-333')
 
         with self.assertRaises(exceptions.InvalidDBStateException):
             self._setup_sut(clean_stale_data=False)
         self._setup_sut()
 
         with self.assertRaises(FileNotFoundError):
-            os.path.getsize(self._path + '/.snapshot-333')
+            os.path.getsize(self._path + '/.checkpoint-333')
 
         await self._run()
         self.assertIsNone(await self.sut.read(second_location_add))
@@ -48,15 +47,15 @@ class TestSnapshots(AioDiskDBTestCase):
         self.assertEqual(x, self.sut._bake_new_file_header() + data)
 
         self._setup_sut()
-        await self._run(expect_failure='Requested a snapshot, but a snapshot already exist')
-        await self.sut._write_db_snapshot(snapshot_id, 0)
+        await self._run(expect_failure='Requested a checkpoint, but a checkpoint already exist')
+        await self.sut._write_db_checkpoint(checkpoint_id, 0)
         with self.assertRaises(exceptions.InvalidDBStateException):
-            await self.sut._write_db_snapshot(snapshot_id, 0)
+            await self.sut._write_db_checkpoint(checkpoint_id, 0)
         self.assertTrue(self.sut.running)
         with self.assertRaises(exceptions.InvalidDBStateException):
-            await self.sut._write_db_snapshot(snapshot_id + 1, 0)
+            await self.sut._write_db_checkpoint(checkpoint_id + 1, 0)
         self.assertTrue(self.sut.running)
-        shutil.copy(self._path + '/.snapshot-333', self._path + '/.snapshot-334')
+        shutil.copy(self._path + '/.checkpoint-333', self._path + '/.checkpoint-334')
         self.assertTrue(self.sut.running)
         with self.assertRaises(exceptions.NotRunningException) as e:
             for x in range(0, 20):

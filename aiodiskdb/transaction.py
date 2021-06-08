@@ -153,7 +153,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         temp_buffers_data = self._bake_temp_buffer_data()
         for buff in temp_buffers_data:
             idx_involved_in_batch.extend(list(buff.idx))
-        await self.session._write_db_snapshot(
+        await self.session._write_db_checkpoint(
             timestamp, *set(idx_involved_in_batch)
         )
         assert temp_buffers_data
@@ -166,5 +166,5 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             )
         assert temp_buffer_data
         await self._update_session_buffer(temp_buffer_data)
-        await self.session._clean_db_snapshot(timestamp)
+        await self.session._clean_db_checkpoint(timestamp)
         self._status = TransactionStatus.DONE
