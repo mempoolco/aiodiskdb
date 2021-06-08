@@ -45,5 +45,4 @@ class AioDBTestDropIndex(AioDiskDBTestCase):
         self.assertIsInstance(self._index_drops[0][0], float)
         self.assertEqual(self._index_drops[0][1], 0)  # index
         self.assertEqual(self._index_drops[0][2], 4)  # length of 'cafe'
-        print(self._index_drops)
         super().tearDown()

@@ -15,6 +15,7 @@ class ItemLocation:
 class LockType(Enum):
     READ = 0
     WRITE = 1
+    TRANSACTION = 2
 
 
 @dataclass

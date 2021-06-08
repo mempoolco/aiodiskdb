@@ -1,4 +1,5 @@
-import asyncio
+import os
+from aiodiskdb import exceptions
 from aiodiskdb.local_types import ItemLocation, WriteEvent
 from test import AioDiskDBTestCase, run_test_db
 
@@ -22,9 +23,7 @@ class TestRTRIM(AioDiskDBTestCase):
             self._writes[0][1]
         )
         self._setup_sut()  # re-instance the sut from scratch.
-        self.loop.create_task(self.sut.run())
-        while not self.sut.running:
-            await asyncio.sleep(0.01)
+        await self._run()
         read1 = await self.sut.read(item_location_2)
         self.assertEqual(b'test_2', read1)
         read2 = await self.sut.read(item_location_2)
@@ -40,3 +39,27 @@ class TestRTRIM(AioDiskDBTestCase):
         )
         read3 = await self.sut.read(item_location_2)
         self.assertEqual(b'test_3', read3)
+        self.sut.disable_overwrite()
+        with self.assertRaises(exceptions.ReadOnlyDatabaseException):
+            await self.sut.rtrim(0, 6)
+        self.sut.enable_overwrite()
+
+
+class TestTrimIndexDoesNotExist(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        with self.assertRaises(exceptions.IndexDoesNotExist):
+            await self.sut.rtrim(99, 111)
+
+        with self.assertRaises(exceptions.IndexDoesNotExist):
+            await self.sut.rtrim(-1, 111)
+
+
+class TestTrimWholeFile(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        for _ in range(0, 20):
+            await self.sut.add(os.urandom(1024**2))
+        await self.sut.rtrim(0, 0)
+        with self.assertRaises(FileNotFoundError):
+            os.path.getsize(self._path + '/data00000.dat')

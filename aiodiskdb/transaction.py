@@ -6,7 +6,8 @@ from collections import OrderedDict
 
 from aiodiskdb import AioDiskDB, exceptions
 from aiodiskdb.abstracts import AioDiskDBTransactionAbstract
-from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, WriteEvent
+from aiodiskdb.internals import ensure_async_lock
+from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, WriteEvent, LockType
 
 
 class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
@@ -16,6 +17,10 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         self._status = TransactionStatus.INITIALIZED
         self._lock = asyncio.Lock()
         self._locations = list()
+
+    @property
+    def _transaction_lock(self):
+        return self.session._transaction_lock
 
     async def _ensure_flush(self):
         """
@@ -119,31 +124,30 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         """
         Commit a transaction, save to data the <_stack> content, using TempBufferData objects.
         """
+        await self._lock.acquire()
         if self._status == TransactionStatus.DONE:
             raise exceptions.TransactionAlreadyCommittedException
         elif self._status == TransactionStatus.ONGOING:
             raise exceptions.TransactionCommitOnGoingException
         elif not self._stack:
             raise exceptions.EmptyTransactionException
-        await self.session._transaction_lock.acquire()
-        await self._lock.acquire()
         now = int(time.time()*1000)
         try:
+            await self.session._flush_buffer()
             await self._do_commit(now)
             locations = self._locations
             self._locations = []
             return locations
         finally:
-            self.session._transaction_lock.release()
             self._lock.release()
 
+    @ensure_async_lock(LockType.TRANSACTION)
     async def _do_commit(self, timestamp: int):
         """
         Part of the <commit> method.
         Actually saves data to disk.
         """
         self._status = TransactionStatus.ONGOING
-        await self._ensure_flush()
         assert not self.session._buffers[-1].size
         idx_involved_in_batch = list()
         temp_buffers_data = self._bake_temp_buffer_data()

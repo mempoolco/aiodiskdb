@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -66,9 +67,9 @@ class AioDBTestErrorWrongGenesisFileShouldNotExists(AioDiskDBTestCase):
         with self.assertRaises(exceptions.NotRunningException):
             for _ in range(0, 100):
                 await self.sut.add(os.urandom(10240))
-        with self.assertRaises(exceptions.InvalidDBStateException) as e:
+        with self.assertRaises(exceptions.NotRunningException) as e:
             await self.sut.run()
-        self.assertTrue('previously went in error state' in str(e.exception))
+        self.assertTrue('ERROR state' in str(e.exception))
 
     def tearDown(self):
         self.assertEqual(1, len(self._stops))
@@ -91,6 +92,8 @@ class AioDBTestErrorInvalidDBSizeError(AioDiskDBTestCase):
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=2)
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(max_file_size=2**32, max_buffer_size=2)
 
 
 class AioDBTestErrorInvalidGenesisBytes(AioDiskDBTestCase):
@@ -103,6 +106,19 @@ class AioDBTestErrorDBRestartedAfterError(AioDiskDBTestCase):
     async def test(self):
         with self.assertRaises(exceptions.InvalidConfigurationException):
             super().setUp(max_file_size=1, max_buffer_size=1, genesis_bytes=b'testtest')
+
+
+class AioDBTestErrorWrongFilesPrefix(AioDiskDBTestCase):
+    async def test(self):
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(file_prefix='1222')
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(file_prefix='__aaa')
+        with self.assertRaises(exceptions.InvalidConfigurationException):
+            super().setUp(file_prefix='')
+
+    def tearDown(self) -> None:
+        pass
 
 
 class AioDBTestStopTimeoutError(AioDiskDBTestCase):
@@ -123,3 +139,58 @@ class AioDBTestStopTimeoutError(AioDiskDBTestCase):
         with self.assertRaises(exceptions.TimeoutException):
             await self.sut.stop()
         self.sut._write_lock.release()
+
+    def tearDown(self) -> None:
+        pass
+
+
+
+class AioDBTestFileSizeChangedError(AioDiskDBTestCase):
+    def setUp(self, *a, **kw):
+        super().setUp(max_file_size=10, max_buffer_size=2, timeout=1)
+
+    async def _fail_flush(self):
+        try:
+            await self.sut._flush_buffer()
+        except exceptions.InvalidDataFileException as e:
+            print('Expected exception raised:', str(e))
+
+    async def test(self):
+        await self._run(expect_failure='wrong state, cannot recover. buffer lost.')
+        await self.sut.add(os.urandom(2 * 1024**2))
+        await self.sut._flush_buffer()
+        filename = str(self.sut.path) + '/data00000.dat'
+
+        with open(filename, 'r+b') as f:
+            f.seek(os.path.getsize(filename)-10)
+            f.truncate()
+        await self.sut.add(os.urandom(2 * 1024 ** 2))
+        await self._fail_flush()
+
+    def tearDown(self) -> None:
+        pass
+
+
+class AioDBTestMissingFileException(AioDiskDBTestCase):
+    def setUp(self, *a, **kw):
+        super().setUp(max_file_size=10, max_buffer_size=2, timeout=1)
+
+    async def _fail_flush(self):
+        try:
+            await self.sut._flush_buffer()
+        except exceptions.FilesInconsistencyException as e:
+            print('Expected exception raised:', str(e))
+
+    async def test(self):
+        await self._run(expect_failure='wrong state, cannot recover. buffer lost.')
+        await self.sut.add(os.urandom(2 * 1024**2))
+        await self.sut._flush_buffer()
+        filename = str(self.sut.path) + '/data00000.dat'
+        os.remove(filename)
+        await self.sut.add(os.urandom(2 * 1024 ** 2))
+        await self._fail_flush()
+
+    def tearDown(self) -> None:
+        pass
+
+

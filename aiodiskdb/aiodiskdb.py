@@ -17,7 +17,7 @@ _FILE_SIZE = 128
 _FILE_PREFIX = 'data'
 _FILE_ZEROS_PADDING = 5
 _BUFFER_SIZE = 16
-_BUFFER_ITEMS = 1000
+_BUFFER_ITEMS = 100
 _FLUSH_INTERVAL = 30
 _GENESIS_BYTES = b'\r\xce\x8f7'
 _TIMEOUT = 30
@@ -159,8 +159,7 @@ class AioDiskDB(AsyncRunnable):
         if self._blocking_stop:
             return False
         self._blocking_stop = True
-        if self._tmp_idx_and_buffer.idx:
-            self._save_buffer_to_disk(self._tmp_idx_and_buffer)
+        assert not self._tmp_idx_and_buffer.idx
         self._tmp_idx_and_buffer = None
         while self._buffer_index:
             buffer = self._buffers.pop(0)
@@ -170,9 +169,6 @@ class AioDiskDB(AsyncRunnable):
 
     @ensure_async_lock(LockType.WRITE)
     async def _clean_temp_buffer(self):
-        await self._clean_temp_buffer_non_locked()
-
-    async def _clean_temp_buffer_non_locked(self):
         """
         Cleanup the current temp buffer. Unload the RAM, to be triggered after a disk flush.
         """
@@ -223,7 +219,7 @@ class AioDiskDB(AsyncRunnable):
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
         """
         files = sorted(os.listdir(self.path))
-        if any(filter(lambda _f: _f.startswith('.transaction-snapshot-'), files)):
+        if any(filter(lambda _f: _f.startswith('.snapshot'), files)):
             raise exceptions.PendingSnapshotException
 
         last_file = files and list(
@@ -263,9 +259,6 @@ class AioDiskDB(AsyncRunnable):
 
     @ensure_async_lock(LockType.WRITE)
     async def _pop_buffer_data(self) -> TempBufferData:
-        return await self._pop_buffer_data_non_locked()
-
-    async def _pop_buffer_data_non_locked(self) -> TempBufferData:
         """
         Remove the buffer from the data queue.
         Put it into the temp storage for disk writing.
@@ -330,20 +323,19 @@ class AioDiskDB(AsyncRunnable):
             return False
         return True
 
-    async def _flush_buffer(self, lock=True):
+    @ensure_async_lock(LockType.TRANSACTION)
+    async def _flush_buffer(self):
         """
         Trigger blocking\non-blocking operations.
         - pop_buffer: coroutine, locked for writing
         - save_buffer_to_disk: blocking threaded task, non locked
         - clean_temp_buffer: coroutine, locked for writing
         """
+        await self._flush_buffer_no_transaction_lock()
+
+    async def _flush_buffer_no_transaction_lock(self):
         timestamp = int(time.time()*1000)
-        if lock:
-            temp_buffer_data = await self._pop_buffer_data()
-        else:
-            temp_buffer_data = await self._pop_buffer_data_non_locked()
-        if not temp_buffer_data.buffer.size:
-            return
+        temp_buffer_data = await self._pop_buffer_data()
         await self._write_db_snapshot(timestamp, temp_buffer_data.buffer.index)
         await asyncio.get_event_loop().run_in_executor(
             self._executor,
@@ -363,11 +355,8 @@ class AioDiskDB(AsyncRunnable):
                     )
                 )
             )
-        if lock:
-            await self._clean_temp_buffer()
-        else:
-            await self._clean_temp_buffer_non_locked()
 
+        await self._clean_temp_buffer()
         self._last_flush = flush_time
         await self._clean_db_snapshot(timestamp)
 
@@ -478,7 +467,7 @@ class AioDiskDB(AsyncRunnable):
         return True
 
     @ensure_running(True)
-    @ensure_async_lock(LockType.WRITE)
+    @ensure_async_lock(LockType.TRANSACTION)
     async def drop_index(self, index: int) -> int:
         """
         Drop a single index.
@@ -487,8 +476,7 @@ class AioDiskDB(AsyncRunnable):
         """
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
-        if self._tmp_idx_and_buffer.buffer:
-            await self._flush_buffer(lock=False)  # The whole method is locked.
+        assert not self._tmp_idx_and_buffer.buffer
         return await self._drop_index_non_locked(index)
 
     async def _drop_index_non_locked(self, index: int):
@@ -512,7 +500,12 @@ class AioDiskDB(AsyncRunnable):
         Persist the current status of files before appending data.
         It will be reverted in case of a commit failure.
         """
+        snapshots = self._get_snapshots()
+        if snapshots:
+            raise exceptions.InvalidDBStateException('Requested a snapshot, but a snapshot already exist')
+
         filenames = map(self._get_filename_by_idx, files_indexes)
+
         snapshot = []
         for i, file_name in enumerate(filenames):
             try:
@@ -543,12 +536,23 @@ class AioDiskDB(AsyncRunnable):
         """
         try:
             os.remove(os.path.join(self.path, f'.snapshot-{timestamp}'))
-        except FileNotFoundError:
-            return
+        except FileNotFoundError as e:
+            raise exceptions.InvalidDBStateException(
+                'Requested to delete a snapshot that does not exist'
+            ) from e
+
+    def _get_snapshots(self) -> typing.List[str]:
+        return list(
+            filter(
+                lambda x: x.startswith('.snapshot-'),
+                os.listdir(self.path)
+            )
+        )
 
     def _apply_snapshot(self):
         """
         Apply a database snapshot to recover a previous state.
+        A snapshot is created before a transaction commit is made.
         A snapshot is created before a transaction commit is made.
         Having a snapshot file during the AioDiskDB boot mean that a transaction commit is failed,
         and stale data may exists in the files.
@@ -556,10 +560,7 @@ class AioDiskDB(AsyncRunnable):
         Stale data is deleted.
         """
         assert not self.running
-        snapshots = list(filter(
-            lambda x: x.startswith('.snapshot-'),
-            os.listdir(self.path)
-        ))
+        snapshots = self._get_snapshots()
         if len(snapshots) > 1:
             # This should NEVER happen.
             raise exceptions.InvalidDBStateException('Multiple snapshots, unrecoverable error.')
@@ -634,7 +635,7 @@ class AioDiskDB(AsyncRunnable):
             raise exceptions.InvalidDBStateException('Pending snapshot. DB must be cleaned.')
 
     @ensure_running(True)
-    @ensure_async_lock(LockType.WRITE)
+    @ensure_async_lock(LockType.TRANSACTION)
     async def rtrim(self, index: int, trim_from: int, safety_check: bytes = b'') -> int:
         """
         Trim an index, from the right.
@@ -646,22 +647,22 @@ class AioDiskDB(AsyncRunnable):
         """
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
+        assert not self._tmp_idx_and_buffer.buffer, self._tmp_idx_and_buffer.buffer
         try:
+            await self._flush_buffer_no_transaction_lock()
             return await self._do_rtrim(index, trim_from, safety_check)
         except FileNotFoundError:
             raise exceptions.IndexDoesNotExist
 
     async def _do_rtrim(self, index: int, trim_from: int, safety_check) -> int:
         if index < 0:
-            raise exceptions.InvalidDataFileException('Index must be > 0')
-        if self._tmp_idx_and_buffer.buffer:
-            await self._flush_buffer(lock=False)  # The whole method is locked.
+            raise exceptions.IndexDoesNotExist('Index must be > 0')
         filename = self._get_filename_by_idx(index)
-
-        if trim_from == self._file_header_size and not safety_check:
+        assert isinstance(trim_from, int)
+        if not trim_from and not safety_check:
             return await self._drop_index_non_locked(index)
 
-        elif trim_from == self._file_header_size:
+        elif not trim_from:
             with open(filename, 'r+b') as f:
                 if safety_check != f.read(len(safety_check)):
                     raise exceptions.InvalidTrimCommandException('safety check failed')
@@ -681,7 +682,7 @@ class AioDiskDB(AsyncRunnable):
         return pre_trim_file_size - file_size
 
     @ensure_running(True)
-    @ensure_async_lock(LockType.WRITE)
+    @ensure_async_lock(LockType.TRANSACTION)
     async def ltrim(self, index: int, trim_to: int, safety_check: bytes = b''):
         """
         Trim and index, from the left.

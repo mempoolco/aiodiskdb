@@ -123,9 +123,8 @@ db = AioDiskDB(
 The max DB size is `max_file_size * max_files`. 
 With `file_padding=5` the max number of files is 10,000. 
 
-A DB created with `file_padding=5` and `max_file_size=16` is capable to store up to 160 GB, or 167,772,160,000 items. 
-
-At its maximum capacity will allocate 10,000 files.
+A DB created with `file_padding=5` and `max_file_size=16` is capable to store up to 160 GB, or 167,772,160,000 items, 
+at its maximum capacity will allocate 10,000 files.
 
 ### Try to do its best
 
@@ -146,7 +145,7 @@ signal.signal(signal.SIGKILL, db.on_stop_signal)
 ![aiodiskdb files](./docs/aiodiskdb.gif)
 
 Concurrency tests, part of the unit tests, can be replicated as system benchmark.
-The following are performed on a common consumer SSD:
+The followings are performed on a common consumer SSD:
 ```
 Duration: 14.12s,
 Reads: 2271 (~162/s),
@@ -167,7 +166,7 @@ Avg file size: 1.0kB
 
 **Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries.
 
-Data pruning is supported with the following methods:
+However, data pruning is supported, with the following methods:
 
 ```python
 db.enable_overwrite()
@@ -182,7 +181,7 @@ These three methods respectively:
 - prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
 - drop the whole index `3`, resulting in a file deletion: `drop_index`
 
-All the items locations not involved into a TRIM operation remains unmodified, even with an `ltrim`.
+All the items locations not involved into a TRIM operation remains unmodified, even after an `ltrim`.
 
 
 

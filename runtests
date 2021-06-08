@@ -1,0 +1,6 @@
+#!/bin/sh
+rm .coverage 2>/dev/null
+rm -rf htmlcov 2>/dev/null
+coverage run --source=aiodiskdb -m unittest discover
+coverage report
+coverage html

@@ -79,8 +79,6 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         loop.run_until_complete()
         """
         loop = asyncio.get_event_loop()
-        if self._error:
-            raise exceptions.InvalidDBStateException('DB previously went in error state')
         try:
             await self._pre_loop()
         except Exception as e:

@@ -1,6 +1,5 @@
 import asyncio
 import os
-import random
 import time
 from random import randint
 
