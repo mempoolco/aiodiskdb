@@ -693,9 +693,9 @@ class AioDiskDB(AsyncRunnable):
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
 
-        if index <= 0:
+        if index < 0:
             raise exceptions.InvalidDataFileException(
-                'Index must be > 0'
+                'Index must be >= 0'
             )
         assert not self._tmp_idx_and_buffer.buffer, self._tmp_idx_and_buffer.buffer
         temp_filename = self._get_filename_by_idx(index, temp=True)
@@ -728,7 +728,7 @@ class AioDiskDB(AsyncRunnable):
             if safety_check_length:
                 origin.seek(seek_at - safety_check_length)
                 check = origin.read(safety_check_length)
-                if check != safety_check_length:
+                if check != safety_check:
                     raise exceptions.InvalidTrimCommandException('safety check failed')
             origin.seek(seek_at)
             temp_filename = self._get_filename_by_idx(index, temp=True)

@@ -194,9 +194,9 @@ assert max_file_size < 4096
 
 If `rtrim` is applied on the **current** index, the space is reused, otherwise no. 
 With `ltrim`, once the space is freed, it is not allocated again. 
-With `drop_index` the whole index is discarded not reused.
+With `drop_index` the discarded index is not reused.
 
-With a lot of data turn-over (pruning by trimming), it may be necessary to set an unusual `file_padding`, and
+With a lot of data turn-over (pruning by trimming), it may be necessary to set an unusual high `file_padding`, and
 increase the database potential size. 
 
 ---
