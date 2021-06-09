@@ -366,6 +366,8 @@ class AioDiskDB(AsyncRunnable):
             filename = self._get_filename_by_idx(location.index)
             with open(filename, 'rb') as file:
                 header = self._read_file_header(file)
+                if location.position < header.trim_offset:
+                    return None
                 file.seek(self._file_header_size + location.position - header.trim_offset)
                 read = file.read(location.size)
             return read or None
@@ -698,6 +700,7 @@ class AioDiskDB(AsyncRunnable):
                 'Index must be >= 0'
             )
         assert not self._tmp_idx_and_buffer.buffer, self._tmp_idx_and_buffer.buffer
+        filename = self._get_filename_by_idx(index)
         temp_filename = self._get_filename_by_idx(index, temp=True)
         try:
             os.path.getsize(temp_filename)
@@ -708,14 +711,21 @@ class AioDiskDB(AsyncRunnable):
             pass
         try:
             await self._flush_buffer_no_transaction_lock()
-            return await self._do_ltrim(index, trim_to, safety_check)
+            with open(filename, 'rb') as origin:
+                header = self._read_file_header(origin)
+            if trim_to <= header.trim_offset:
+                raise exceptions.InvalidTrimCommandException(
+                    f'trim_to must be > current_offset ({header.trim_offset})'
+                )
+
+            await self._do_ltrim(index, trim_to, safety_check, header)
+            if self._buffers[-1].index == index:
+                await self._refresh_current_buffer()
         except FileNotFoundError:
             raise exceptions.IndexDoesNotExist
 
-    async def _do_ltrim(self, index: int, trim_to: int, safety_check: bytes) -> int:
+    async def _do_ltrim(self, index: int, trim_to: int, safety_check: bytes, header: FileHeader) -> int:
         filename = self._get_filename_by_idx(index)
-        with open(filename, 'rb') as origin:
-            header = self._read_file_header(origin)
         index_size = os.path.getsize(filename) - self._file_header_size + header.trim_offset
         if index_size < trim_to:
             raise exceptions.InvalidTrimCommandException('trim_to must be <= index_size')
@@ -730,15 +740,15 @@ class AioDiskDB(AsyncRunnable):
                 check = origin.read(safety_check_length)
                 if check != safety_check:
                     raise exceptions.InvalidTrimCommandException('safety check failed')
-            origin.seek(seek_at)
+            else:
+                origin.seek(seek_at)
             temp_filename = self._get_filename_by_idx(index, temp=True)
             with open(temp_filename, 'wb') as target:
-                header.trim_offset += trim_to
+                header.trim_offset = trim_to
                 target.write(header.serialize())
                 data = origin.read(1024**2)
                 while data:
                     target.write(data)
                     data = origin.read(1024 ** 2)
         shutil.move(temp_filename, filename)
-        return 0
-
+        return trim_to
