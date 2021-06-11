@@ -54,10 +54,6 @@ class TransactionAlreadyCommittedException(AioDiskDBException):
     pass
 
 
-class PendingSnapshotException(AioDiskDBException):
-    pass
-
-
 class InvalidDBStateException(AioDiskDBException):
     pass
 
@@ -67,4 +63,8 @@ class IndexDoesNotExist(AioDiskDBException):
 
 
 class EmptyPayloadException(AioDiskDBException):
+    pass
+
+
+class InvalidTrimCommandException(AioDiskDBException):
     pass

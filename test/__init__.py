@@ -1,11 +1,13 @@
 import asyncio
 import random
+import shutil
+import time
 from unittest import IsolatedAsyncioTestCase
 
 import typing
 
 from aiodiskdb import exceptions
-from aiodiskdb.aiodiskdb import AioDiskDB, _TIMEOUT
+from aiodiskdb.aiodiskdb import AioDiskDB, _TIMEOUT, _FLUSH_INTERVAL
 from aiodiskdb.local_types import WriteEvent
 
 
@@ -18,22 +20,27 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
             max_buffer_size=16,
             overwrite=True,
             genesis_bytes=b'test',
-            timeout=_TIMEOUT
+            timeout=_TIMEOUT,
+            file_prefix='data',
+            flush_interval=_FLUSH_INTERVAL
     ):
+        self._flush_interval = flush_interval
         self.loop = asyncio.get_event_loop()
         self._timeout = timeout
-        self._overwrite = True
+        self._overwrite = overwrite
         self._max_file_size = max_file_size
         self._max_buffer_size = max_buffer_size
         self._genesis_bytes = genesis_bytes
+        self._file_prefix = file_prefix
         self._writes = []
         self._starts = []
         self._stops = []
         self._index_drops = []
         self._failures = []
-        self._setup_sut()
-        self.sut.destroy_db()
-        self._overwrite = overwrite
+        try:
+            shutil.rmtree(self._path)
+        except FileNotFoundError:
+            pass
         self._setup_sut()
 
     def _hook_events(self):
@@ -70,21 +77,25 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
             max_buffer_size=self._max_buffer_size,
             overwrite=self._overwrite,
             genesis_bytes=self._genesis_bytes,
-            clean_stale_data=clean_stale_data
+            clean_stale_data=clean_stale_data,
+            file_prefix=self._file_prefix,
+            flush_interval=self._flush_interval
         )
         self._hook_events()
 
-    async def _run(self, expect_failure=False):
+    async def _run(self, expect_failure=''):
         async def _handle_run():
             try:
                 await self.sut.run()
             except Exception as e:
-                if not expect_failure or expect_failure not in str(e):
-                    raise
+                if expect_failure:
+                    self.assertTrue(expect_failure in str(e))
 
         self.loop.create_task(_handle_run(), name='aiodiskdb_main_loop')
+        s = time.time()
         while not self.sut.running:
             await asyncio.sleep(0.01)
+            self.assertLess(time.time() - s, 3, msg='timeout')
 
     async def _stop(self):
         await self.sut.stop()

@@ -39,6 +39,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         super().__init__(*_, **__)
         self._running = False
         self._error = False
+        self._set_stop = False
         self._do_stop = False
         self._timeout = timeout
         self._blocking_stop = False
@@ -79,8 +80,6 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         loop.run_until_complete()
         """
         loop = asyncio.get_event_loop()
-        if self._error:
-            raise exceptions.InvalidDBStateException('DB previously went in error state')
         try:
             await self._pre_loop()
         except Exception as e:
@@ -95,8 +94,9 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
             if self._blocking_stop:
                 break
             try:
-                if self._do_stop:
+                if self._set_stop:
                     await self._teardown()
+                    self._do_stop = True
                     break
                 await self._run_loop()
                 await asyncio.sleep(0.005)
@@ -115,7 +115,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
     @ensure_running(True)
     async def stop(self):
         stop_requested_at = time.time()
-        self._do_stop = True
+        self._set_stop = True
         while time.time() - stop_requested_at < self._timeout:
             if not self._running:
                 return True

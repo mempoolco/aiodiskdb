@@ -96,6 +96,28 @@ transaction.add(b'deadbeef')
 locations: typing.Sequence[ItemLocation] = await transaction.commit()
 ```
 
+
+### Not-so-append-only
+
+**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries.
+
+However, data pruning is supported, with the following methods:
+
+```python
+db.enable_overwrite()
+db.rtrim(0, 400)
+db.ltrim(8, 900)
+db.drop_index(3)
+db.disable_overwrite()
+```
+
+These three methods respectively:
+- prune data from the right, at index `0`, starting from the location `400` to the index end (`rtrim`)
+- prune data from the left, at index `8`, starting from the beginning to the location `900` (`ltrim`)
+- drop the whole index `3`, resulting in a file deletion: `drop_index`
+
+All the items locations not involved into a TRIM operation remains unmodified, even after an `ltrim`.
+
 ### Highly customizable
 
 The default parameters: 
@@ -123,9 +145,8 @@ db = AioDiskDB(
 The max DB size is `max_file_size * max_files`. 
 With `file_padding=5` the max number of files is 10,000. 
 
-A DB created with `file_padding=5` and `max_file_size=16` is capable to store up to 160 GB, or 167,772,160,000 items. 
-
-At its maximum capacity will allocate 10,000 files.
+A DB created with `file_padding=5` and `max_file_size=16` is capable to store up to 160 GB, or 167,772,160,000 items, 
+at its maximum capacity will allocate 10,000 files.
 
 ### Try to do its best
 
@@ -146,7 +167,7 @@ signal.signal(signal.SIGKILL, db.on_stop_signal)
 ![aiodiskdb files](./docs/aiodiskdb.gif)
 
 Concurrency tests, part of the unit tests, can be replicated as system benchmark.
-The following are performed on a common consumer SSD:
+The followings are performed on a common consumer SSD:
 ```
 Duration: 14.12s,
 Reads: 2271 (~162/s),
@@ -163,26 +184,20 @@ Bandwidth: 20MB (1.05MB/s),
 Avg file size: 1.0kB
 ```
 
-### Not-so-append-only
-
-**Aiodiskdb** is an append-only database. It means you'll never see methods to *delete* or *remove* single entries. However, indexes can be truncated, resulting a bulk delete of multiple locations.
-
-With a combination of the `transaction` and `index_drop` or `rpop` methods, data pruning can be implemented.
-
-
 ### Limitations
-
-Simply put, from developer to developer,
-the following are the known limitations:
 
 ```python
 assert len(data) <= max_buffer_size
 assert max_transaction_size < RAM
+assert max_file_size < 4096
 ```
 
-So, if, you have a max_buffer_size of 16 MB, you can't store a single 20 MB blob in the DB and must
-shrink it.
+If `rtrim` is applied on the **current** index, the space is reused, otherwise no. 
+With `ltrim`, once the space is freed, it is not allocated again. 
+With `drop_index` the discarded index is not reused.
 
+With a lot of data turn-over (pruning by trimming), it may be necessary to set an unusual high `file_padding`, and
+increase the database potential size. 
 
 ---
 
@@ -194,6 +209,6 @@ Logo by mepheesto.
 
 ### Notes
 
-**Alpha stage. Still under development, use with care and expect to loss data.**
+**Alpha stage. Still under development, use with care and expect data losses.**
 
 Donate :heart: **Bitcoin** to: 3FVGopUDc6tyAP6t4P8f3GkYTJ5JD5tPwV or [paypal](https://paypal.me/gdax)

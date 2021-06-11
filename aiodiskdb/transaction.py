@@ -2,48 +2,25 @@ import asyncio
 import time
 
 import typing
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from aiodiskdb import AioDiskDB, exceptions
 from aiodiskdb.abstracts import AioDiskDBTransactionAbstract
-from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, WriteEvent
+from aiodiskdb.internals import ensure_async_lock
+from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, LockType
 
 
 class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
     def __init__(self, session: AioDiskDB):
         self.session = session
-        self._stack = list()
+        self._stack = deque()
         self._status = TransactionStatus.INITIALIZED
         self._lock = asyncio.Lock()
         self._locations = list()
 
-    async def _ensure_flush(self):
-        """
-        This method must use non-locked session methods
-        cause it's already into a transaction lock.
-        """
-        temp_buffer_data = await self.session._pop_buffer_data_non_locked()
-        await asyncio.get_event_loop().run_in_executor(
-            None,
-            self.session._save_buffer_to_disk,
-            temp_buffer_data
-        )
-        flush_time = time.time()
-        if temp_buffer_data.buffer.data:
-            position = temp_buffer_data.buffer.file_size - temp_buffer_data.buffer.size
-            size = temp_buffer_data.buffer.size
-            asyncio.get_event_loop().create_task(
-                self.session.events.on_write(
-                    flush_time,
-                    WriteEvent(
-                        index=temp_buffer_data.buffer.index,
-                        position=not position and self.session.GENESIS_BYTES_LENGTH or position,
-                        size=not position and size - self.session.GENESIS_BYTES_LENGTH or size
-                    )
-                )
-            )
-        await self.session._clean_temp_buffer_non_locked()
-        self._last_flush = flush_time
+    @property
+    def _transaction_lock(self):
+        return self.session._transaction_lock
 
     def _bake_new_temp_buffer_data(self, res: typing.List[TempBufferData]) -> None:
         """
@@ -53,13 +30,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         new_idx = res[-1].buffer.index + 1
         res.append(
             TempBufferData(
-                buffer=Buffer(
-                    index=new_idx,
-                    size=self.session.GENESIS_BYTES_LENGTH,
-                    items=0,
-                    file_size=self.session.GENESIS_BYTES_LENGTH,
-                    data=self.session._genesis_bytes,
-                ),
+                self.session._bake_new_buffer(new_idx),
                 idx={new_idx: dict()}
             )
         )
@@ -80,13 +51,14 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             )
         ]
         max_file_size = self.session._max_file_size
-        while self._stack:
-            data_size = len(self._stack[0])
+        while len(self._stack):
+            data = self._stack.popleft()
+            data_size = len(data)
             buffer: Buffer = res[-1].buffer
             if data_size + buffer.file_size > max_file_size:
                 self._bake_new_temp_buffer_data(res)
+                self._stack.insert(0, data)
                 continue
-            data = self._stack.pop(0)
             self._locations.append(
                 ItemLocation(buffer.index, buffer.file_size, data_size)
             )
@@ -102,6 +74,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         """
         temp_buffer_data.buffer.data = b''
         temp_buffer_data.buffer.size = 0
+        temp_buffer_data.buffer.head = not temp_buffer_data.buffer.file_size
         self.session._buffers[-1] = temp_buffer_data.buffer
         self.session._buffer_index = OrderedDict({temp_buffer_data.buffer.index: dict()})
 
@@ -126,37 +99,35 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         """
         Commit a transaction, save to data the <_stack> content, using TempBufferData objects.
         """
-        if self._status == TransactionStatus.DONE:
-            raise exceptions.TransactionAlreadyCommittedException
-        elif self._status == TransactionStatus.ONGOING:
-            raise exceptions.TransactionCommitOnGoingException
-        elif not self._stack:
-            raise exceptions.EmptyTransactionException
-        await self.session._transaction_lock.acquire()
         await self._lock.acquire()
-        now = int(time.time()*1000)
         try:
+            if self._status == TransactionStatus.DONE:
+                raise exceptions.TransactionAlreadyCommittedException
+            elif not self._stack:
+                raise exceptions.EmptyTransactionException
+            now = int(time.time()*1000)
+
+            await self.session._flush_buffer()
             await self._do_commit(now)
             locations = self._locations
-            self._locations = []
+            self._locations = list()
             return locations
         finally:
-            self.session._transaction_lock.release()
             self._lock.release()
 
+    @ensure_async_lock(LockType.TRANSACTION)
     async def _do_commit(self, timestamp: int):
         """
         Part of the <commit> method.
         Actually saves data to disk.
         """
         self._status = TransactionStatus.ONGOING
-        await self._ensure_flush()
         assert not self.session._buffers[-1].size
         idx_involved_in_batch = list()
         temp_buffers_data = self._bake_temp_buffer_data()
         for buff in temp_buffers_data:
             idx_involved_in_batch.extend(list(buff.idx))
-        await self.session._write_db_snapshot(
+        await self.session._write_db_checkpoint(
             timestamp, *set(idx_involved_in_batch)
         )
         assert temp_buffers_data
@@ -169,5 +140,5 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             )
         assert temp_buffer_data
         await self._update_session_buffer(temp_buffer_data)
-        await self.session._clean_db_snapshot(timestamp)
+        await self.session._clean_db_checkpoint(timestamp)
         self._status = TransactionStatus.DONE
