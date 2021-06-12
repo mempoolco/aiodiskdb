@@ -72,7 +72,7 @@ class TestReadWriteNonCached(AioDiskDBTestCase):
         self.loop.create_task(self.sut.run())
         while not self.sut.running:
             await asyncio.sleep(0.01)
-        new_loc_2 = ItemLocation.serialize(item_location_2.deserialize())
+        new_loc_2 = ItemLocation.deserialize(item_location_2.serialize())
         read1 = await self.sut.read(new_loc_2)
         self.assertEqual(b'test_2', read1)
         read2 = await self.sut.read(item_location_2)

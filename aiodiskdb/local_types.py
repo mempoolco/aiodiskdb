@@ -11,13 +11,13 @@ class ItemLocation:
     position: int
     size: int
 
-    def deserialize(self):
+    def serialize(self):
         return self.index.to_bytes(4, 'little') + \
             self.position.to_bytes(4, 'little') + \
             self.size.to_bytes(4, 'little')
 
     @classmethod
-    def serialize(cls, location: bytes):
+    def deserialize(cls, location: bytes):
         return cls(
             index=int.from_bytes(location[:4], 'little'),
             position=int.from_bytes(location[4:8], 'little'),
