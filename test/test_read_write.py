@@ -3,6 +3,20 @@ from aiodiskdb.local_types import ItemLocation, WriteEvent
 from test import AioDiskDBTestCase, run_test_db
 
 
+class TestFlush(AioDiskDBTestCase):
+    @run_test_db
+    async def test(self):
+        item_location = await self.sut.add(b'test_1')
+        self.assertEqual(
+            ItemLocation(0, 0, 6),
+            item_location
+        )
+        await self.sut.flush()
+        self.assertEqual(self.sut._buffers[-1].data, b'')
+        read1 = await self.sut.read(item_location)
+        self.assertEqual(b'test_1', read1)
+
+
 class TestReadWriteCached(AioDiskDBTestCase):
     @run_test_db
     async def test(self):

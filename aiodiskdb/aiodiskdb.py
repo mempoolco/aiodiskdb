@@ -322,6 +322,12 @@ class AioDiskDB(AsyncRunnable):
         return True
 
     @ensure_async_lock(LockType.TRANSACTION)
+    async def flush(self):
+        if not self._buffers[-1].data:
+            return
+        return await self._flush_buffer_no_transaction_lock()
+
+    @ensure_async_lock(LockType.TRANSACTION)
     async def _flush_buffer(self):
         """
         Trigger blocking\non-blocking operations.
