@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 import shutil
 import time
@@ -83,13 +84,15 @@ class AioDiskDBTestCase(IsolatedAsyncioTestCase):
         )
         self._hook_events()
 
-    async def _run(self, expect_failure=''):
+    async def _run(self, expect_failure: str = ''):
         async def _handle_run():
             try:
                 await self.sut.run()
             except Exception as e:
                 if expect_failure:
                     self.assertTrue(expect_failure in str(e))
+                    return
+                raise
 
         self.loop.create_task(_handle_run(), name='aiodiskdb_main_loop')
         s = time.time()

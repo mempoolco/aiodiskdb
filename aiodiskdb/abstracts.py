@@ -40,9 +40,9 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         self._running = False
         self._error = False
         self._set_stop = False
-        self._do_stop = False
         self._timeout = timeout
         self._blocking_stop = False
+        self._stopped = False
 
     @abc.abstractmethod
     def _pre_stop_signal(self):
@@ -72,6 +72,10 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
     def running(self):
         return self._running
 
+    @property
+    def stopped(self):
+        return self._stopped
+
     @ensure_running(False)
     async def run(self):
         """
@@ -80,12 +84,16 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         loop.create_task(instance.run())
         loop.run_until_complete()
         """
+        if self._stopped or self._set_stop or self._error:
+            raise exceptions.InvalidDBStateException('DB instance not clean.')
+
         loop = asyncio.get_event_loop()
         try:
             await self._pre_loop()
         except Exception as e:
             self._running = False
             self._error = e
+            self._stopped = True
             raise
         start_fired = False
         logger.info('Starting aiodiskdb')
@@ -98,7 +106,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
             try:
                 if self._set_stop:
                     await self._teardown()
-                    self._do_stop = True
+                    self._stopped = True
                     break
                 await self._run_loop()
                 await asyncio.sleep(0.005)
@@ -110,10 +118,14 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
                 self._error = e
                 self.events.on_stop and \
                     loop.create_task(self.events.on_stop(time.time()))
+                self._stopped = True
                 raise
         self.events.on_stop and loop.create_task(self.events.on_stop(time.time()))
         logger.warning('Aiodiskdb is stopped')
         self._running = False
+        self._stopped = True
+        if self._error and isinstance(self._error, Exception):
+            raise
 
     @ensure_running(True)
     async def stop(self):
@@ -122,6 +134,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
         self._set_stop = True
         while time.time() - stop_requested_at < self._timeout:
             if not self._running:
+                self._stopped = True
                 return True
             await asyncio.sleep(0.1)
         raise exceptions.TimeoutException(f'Loop is still running after {self._timeout} seconds')

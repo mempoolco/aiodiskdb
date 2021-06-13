@@ -1,9 +1,38 @@
+import asyncio
 import os
 import time
 from pathlib import Path
 
 from aiodiskdb import exceptions
 from test import AioDiskDBTestCase
+
+
+class AioDBTestRunTwiceAndReset(AioDiskDBTestCase):
+    async def test(self):
+        await self._run()
+        self.assertTrue(self.sut.running)
+        await self.sut.stop()
+        self.assertFalse(self.sut.running)
+        s = time.time()
+        while not self.sut._stopped:
+            if time.time() - s > 3:
+                raise ValueError('Unusually slow')
+            await asyncio.sleep(0.1)
+        self.assertTrue(self.sut._stopped)
+        with self.assertRaises(exceptions.InvalidDBStateException):
+            await self.sut.run()
+        self.assertTrue(self.sut._set_stop)
+        self.sut.reset()
+        self.assertFalse(self.sut._stopped)
+        self.assertFalse(self.sut.running)
+        await self._run()
+        self.assertTrue(self.sut.running)
+        await self.sut.stop()
+        s = time.time()
+        while not self.sut._stopped:
+            if time.time() - s > 3:
+                raise ValueError('Unusually slow')
+            await asyncio.sleep(0.1)
 
 
 class AioDBTestErrorWrongFiles(AioDiskDBTestCase):

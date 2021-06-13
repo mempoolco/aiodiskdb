@@ -72,20 +72,40 @@ class AioDiskDB(AsyncRunnable):
         self._buffer_index = OrderedDict()
         self._buffers: typing.List[Buffer] = list()
         self._last_flush = None
+        self._concurrency = concurrency
+        self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
         self._executor = ThreadPoolExecutor(max_workers=concurrency)
         self._overwrite = overwrite
-        self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
+        self._clean_stale_data = clean_stale_data
+        self._init_db()
+
+    def _init_db(self):
         self._file_header_size = self.GENESIS_BYTES_LENGTH + \
                              self.HEADER_TRIM_OFFSET + \
                              self.RESERVED_HEADER_LENGTH
-        if clean_stale_data:
+        if self._clean_stale_data:
             self._drop_existing_temp_files()
             self._apply_checkpoint()
         else:
             self._ensure_no_pending_checkpoint()
-        _max_accepted_file_size = 2**32 - 1 - self._file_header_size
-        if max_file_size > _max_accepted_file_size:
+        _max_accepted_file_size = (2 ** 32 * 1024 ** 2) - 1 - self._file_header_size
+        if self._max_file_size > _max_accepted_file_size:
             raise exceptions.InvalidConfigurationException(f'max file size is {_max_accepted_file_size}b')
+
+    def reset(self):
+        logger.debug('Requested DB reset to init state')
+        assert self._stopped
+        self._buffer_index = OrderedDict()
+        self._buffers: typing.List[Buffer] = list()
+        self._last_flush = None
+        self._executor = ThreadPoolExecutor(max_workers=self._concurrency)
+        self._tmp_idx_and_buffer = TempBufferData(idx=dict(), buffer=None)
+        self._running = False
+        self._error = False
+        self._set_stop = False
+        self._blocking_stop = False
+        self._stopped = False
+        self._init_db()
 
     def _hash_file(self, f: typing.IO) -> typing.Optional[bytes]:
         """

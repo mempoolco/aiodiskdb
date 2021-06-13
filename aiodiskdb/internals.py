@@ -9,7 +9,7 @@ def ensure_running(expected_state: bool, allow_stop_state=False):
         async def _ensure(self, *a, **kw):
             if self._error:
                 raise exceptions.NotRunningException('Database is in ERROR state')
-            if expected_state and self._do_stop and not allow_stop_state:
+            if expected_state and self._stopped and not allow_stop_state:
                 raise exceptions.NotRunningException('Database is in STOP state')
             if self.running != expected_state:
                 raise exceptions.NotRunningException('Database it not running')
