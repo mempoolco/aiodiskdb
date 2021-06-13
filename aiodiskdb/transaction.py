@@ -6,7 +6,7 @@ from collections import OrderedDict, deque
 
 from aiodiskdb import AioDiskDB, exceptions
 from aiodiskdb.abstracts import AioDiskDBTransactionAbstract
-from aiodiskdb.internals import ensure_async_lock
+from aiodiskdb.internals import ensure_async_lock, logger
 from aiodiskdb.local_types import TempBufferData, TransactionStatus, Buffer, ItemLocation, LockType
 
 
@@ -17,6 +17,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         self._status = TransactionStatus.INITIALIZED
         self._lock = asyncio.Lock()
         self._locations = list()
+        logger.debug('Initialized a new transaction')
 
     @property
     def _transaction_lock(self):
@@ -84,6 +85,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         Data added into this scope is not available into the session
         until the transaction is committed.
         """
+        logger.debug('Adding item to transaction: %s', len(data))
         if len(data) > self.session._max_file_size:
             raise exceptions.WriteFailedException(
                 f'File too big: {len(data)} > {self.session._max_file_size}'
@@ -99,6 +101,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
         """
         Commit a transaction, save to data the <_stack> content, using TempBufferData objects.
         """
+        logger.debug('Requested transaction commit, tx size: %s', len(self._stack))
         await self._lock.acquire()
         try:
             if self._status == TransactionStatus.DONE:
@@ -111,6 +114,7 @@ class AioDiskDBTransaction(AioDiskDBTransactionAbstract):
             await self._do_commit(now)
             locations = self._locations
             self._locations = list()
+            logger.debug('Transaction commit done')
             return locations
         finally:
             self._lock.release()

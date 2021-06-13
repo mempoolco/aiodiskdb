@@ -5,7 +5,7 @@ import time
 import typing
 
 from aiodiskdb import exceptions
-from aiodiskdb.internals import ensure_running, GracefulExit
+from aiodiskdb.internals import ensure_running, GracefulExit, logger
 from aiodiskdb.local_types import EventsHandlers, ItemLocation
 
 
@@ -48,10 +48,11 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
     def _pre_stop_signal(self):
         pass  # pragma: no cover
 
-    def on_stop_signal(self):
+    def on_stop_signal(self, *args):
         """
         Non async method. Handle stop signals.
         """
+        logger.warning('Requested stop signal: %s', args)
         if self._pre_stop_signal():
             raise GracefulExit()
 
@@ -87,6 +88,7 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
             self._error = e
             raise
         start_fired = False
+        logger.info('Starting aiodiskdb')
         while 1:
             if not start_fired and self.running and self.events.on_start:
                 loop.create_task(self.events.on_start(time.time()))
@@ -110,10 +112,12 @@ class AsyncRunnable(AsyncObservable, AsyncLockable, metaclass=abc.ABCMeta):
                     loop.create_task(self.events.on_stop(time.time()))
                 raise
         self.events.on_stop and loop.create_task(self.events.on_stop(time.time()))
+        logger.warning('Aiodiskdb is stopped')
         self._running = False
 
     @ensure_running(True)
     async def stop(self):
+        logger.debug('Requested stop')
         stop_requested_at = time.time()
         self._set_stop = True
         while time.time() - stop_requested_at < self._timeout:
@@ -129,5 +133,5 @@ class AioDiskDBTransactionAbstract(metaclass=abc.ABCMeta):
         pass  # pragma: no cover
 
     @abc.abstractmethod
-    def commit(self) -> typing.Iterable[ItemLocation]:
+    async def commit(self) -> typing.Iterable[ItemLocation]:
         pass  # pragma: no cover

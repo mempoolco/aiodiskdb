@@ -9,7 +9,7 @@ import time
 import typing
 
 from aiodiskdb import exceptions
-from aiodiskdb.internals import ensure_running,  ensure_async_lock
+from aiodiskdb.internals import ensure_running, ensure_async_lock, logger
 from aiodiskdb.abstracts import AsyncRunnable, AioDiskDBTransactionAbstract
 from aiodiskdb.local_types import ItemLocation, LockType, Buffer, TempBufferData, WriteEvent, FileHeader
 
@@ -219,6 +219,7 @@ class AioDiskDB(AsyncRunnable):
         Setup the current buffer, starting from the disk files.
         If no files are found, setup a fresh buffer, otherwise check the genesis bytes.
         """
+        logger.debug('Setting up current buffer')
         files = sorted(os.listdir(self.path))
         last_file = files and list(
             filter(lambda x: x.startswith(self._file_prefix) and x.endswith('.dat'), files)
@@ -244,6 +245,7 @@ class AioDiskDB(AsyncRunnable):
             )
         self._buffers.append(buffer)
         self._buffer_index[curr_idx] = OrderedDict()
+        logger.debug('Current buffer setup done')
 
     @ensure_async_lock(LockType.TRANSACTION)
     async def _teardown(self):
@@ -283,6 +285,7 @@ class AioDiskDB(AsyncRunnable):
         """
         Actually saves data from a temp buffer to the target file and position.
         """
+        logger.debug('Saving buffer to disk')
         assert buffer_data.buffer and buffer_data.idx, (buffer_data.buffer, buffer_data.idx)
         buffer = buffer_data.buffer
         filename = self._get_filename_by_idx(buffer.index)
@@ -323,6 +326,7 @@ class AioDiskDB(AsyncRunnable):
 
     @ensure_async_lock(LockType.TRANSACTION)
     async def flush(self):
+        logger.debug('Requested explicit flush')
         if not self._buffers[-1].data:
             return
         return await self._flush_buffer_no_transaction_lock()
@@ -404,6 +408,7 @@ class AioDiskDB(AsyncRunnable):
         :param data: bytes
         :return: ItemLocation(int, int, int)
         """
+        logger.debug('Adding item to db, size: %s', len(data))
         if not data:
             raise exceptions.EmptyPayloadException
         s = time.time()
@@ -448,6 +453,7 @@ class AioDiskDB(AsyncRunnable):
         :param location: ItemLocation(int, int, int)
         :return: bytes
         """
+        logger.debug('Reading location from db: %s', location)
         return self._read_data_from_buffer(location) or \
             self._read_data_from_temp_buffer(location) or \
             await asyncio.get_event_loop().run_in_executor(
@@ -465,6 +471,7 @@ class AioDiskDB(AsyncRunnable):
         """
         Destroy the DB, clean the disk.
         """
+        logger.warning('Requested DB destroy')
         if self.running:
             raise exceptions.RunningException('Database must be stopped before destroying it')
         if not self._overwrite:
@@ -480,6 +487,7 @@ class AioDiskDB(AsyncRunnable):
         Ensures a flush first.
         If the deleted index is the current one, setup it again from scratch.
         """
+        logger.info('Requested index drop: %s', index)
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
         assert not self._tmp_idx_and_buffer.buffer
@@ -652,6 +660,7 @@ class AioDiskDB(AsyncRunnable):
 
         return the size of the trimmed slice.
         """
+        logger.debug('Requested rtrim: %s, %s, %s', index, trim_from, safety_check)
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
         assert not self._tmp_idx_and_buffer.buffer, self._tmp_idx_and_buffer.buffer
@@ -698,6 +707,7 @@ class AioDiskDB(AsyncRunnable):
         anything before this point is trimmed out.
         safety_check: optional, must match the last bytes of the trimmed slice.
         """
+        logger.debug('Requested ltrim: %s, %s, %s', index, trim_to, safety_check)
         if not self._overwrite:
             raise exceptions.ReadOnlyDatabaseException
 

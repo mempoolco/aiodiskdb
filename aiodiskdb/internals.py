@@ -1,3 +1,5 @@
+import logging
+
 from aiodiskdb import exceptions
 from aiodiskdb.local_types import LockType
 
@@ -58,3 +60,6 @@ def ensure_async_lock(lock_type: LockType):
 
 class GracefulExit(SystemExit):
     code = 1
+
+
+logger = logging.getLogger('aiodiskdb')

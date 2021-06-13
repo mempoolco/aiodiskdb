@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name='aiodiskdb',
-    version='0.2.1',
+    version='0.2.3',
     long_description=long_description,
     long_description_content_type="text/markdown",
     url='https://github.com/mempoolco/aiodiskdb/',
